@@ -14,24 +14,26 @@
       row.dataset.stage = '1';
       row.children[5].innerHTML = statusPill('Delayed');
     }
+    // All purchased items are listed here in the details, even though the
+    // deliveries table only shows the first one.
+    const itemsList = String(d.items || '').split(',').map(s => s.trim()).filter(Boolean);
+    const itemsMarkup = itemsList.length
+      ? `<div class="supplier-product-inline">${itemsList.map(n => `<span class="supplier-product-tag">${htmlEscape(n)}</span>`).join('')}</div>`
+      : '<div class="modal-helper">No items recorded.</div>';
     document.getElementById('track-title').textContent = `${ship} · ${supplier}`;
     document.getElementById('track-body').innerHTML = `
       <div class="detail-grid">
         <div class="detail-card"><h4>Shipment summary</h4><div class="modal-row"><span>Shipment no.</span><span>${ship}</span></div><div class="modal-row"><span>PO number</span><span>${d.po || textFrom(row.children[1])}</span></div><div class="modal-row"><span>Supplier</span><span>${supplier}</span></div><div class="modal-row"><span>Status</span><span>${textFrom(row.children[5])}</span></div></div>
         <div class="detail-card"><h4>Tracking info</h4><div class="modal-row"><span>Date</span><span>${dateLabel}</span></div><div class="modal-row"><span>Deliver to</span><span>${d.warehouse || '—'}</span></div><div class="modal-row"><span>Carrier</span><span>${d.carrier || 'Assigned carrier'}</span></div><div class="modal-row"><span>Current stage</span><span>${Math.min(stage + 1, 5)} / 5</span></div><div class="modal-row"><span>Delivery note</span><span>${d.note || 'No additional note'}</span></div></div>
+        <div class="detail-card full"><h4>Items</h4>${itemsMarkup}</div>
       </div>
     `;
-    const markReceivedBtn = document.getElementById('mark-received-btn');
+    // An in-transit shipment can't be completed — it hasn't arrived yet. Only
+    // delayed/delivered shipments may be marked completed.
     const markCompletedBtn = document.getElementById('mark-completed-btn');
-    if (currentStatus === 'delivered') {
-      markReceivedBtn.style.display = 'none';
-      markCompletedBtn.style.display = 'block';
-    } else if (currentStatus === 'intransit' || currentStatus === 'delayed') {
-      markReceivedBtn.style.display = 'block';
-      markCompletedBtn.style.display = 'none';
-    } else {
-      markReceivedBtn.style.display = 'none';
-      markCompletedBtn.style.display = 'none';
+    if (markCompletedBtn) {
+      const canComplete = ['delayed', 'delivered'].includes(currentStatus);
+      markCompletedBtn.style.display = canComplete ? 'block' : 'none';
     }
     document.getElementById('track-modal').__row = row;
     document.getElementById('track-modal').classList.add('open');
@@ -48,7 +50,7 @@
       const poRow = findPoRowByNumber(row.dataset.po || '');
       if(poRow){
         poRow.dataset.status = 'processing';
-        poRow.children[6].innerHTML = statusPill('Processing');
+        poRow.children[5].innerHTML = statusPill('Processing');
       }
       // Persist delivery status to backend when possible
       const delId = row.dataset.id;
@@ -79,7 +81,7 @@
       const poRow = findPoRowByNumber(row.dataset.po || '');
       if(poRow){
         poRow.dataset.status = 'completed';
-        poRow.children[6].innerHTML = statusPill('Completed');
+        poRow.children[5].innerHTML = statusPill('Completed');
       }
       const delId = row.dataset.id;
       if(delId){

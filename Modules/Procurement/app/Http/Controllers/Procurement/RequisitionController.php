@@ -139,7 +139,7 @@ class RequisitionController extends Controller
 
     private function getRequisitionSelectFields($connection): array
     {
-        if ($connection->getName() === 'orderfullfillment') {
+        if ($connection->getName() === 'order_fulfillment') {
             return [
                 'id',
                 'req_number as requisition_number',

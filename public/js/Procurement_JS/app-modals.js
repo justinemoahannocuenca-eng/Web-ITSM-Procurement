@@ -168,13 +168,15 @@
       const po = textFrom(row.children[0]);
       const supplier = supplierNameFromCell(row.children[1]);
       const item = row.dataset.item || textFrom(row.children[2]) || 'Procurement item';
-      const qty = Number(row.dataset.qty || textFrom(row.children[3]) || 0) || 0;
-      const amount = Number(row.dataset.amount || parseMoney(textFrom(row.children[4])) || 0);
-      const unitPrice = Number(row.dataset.unitPrice || (qty ? amount / qty : parseMoney(textFrom(row.children[3])))) || 0;
+      const qty = Number(row.dataset.qty || 0) || 0;
+      // Columns after removing "Unit price": 0 PO, 1 supplier, 2 item,
+      // 3 total amount, 4 priority, 5 status, 6 date.
+      const amount = Number(row.dataset.amount || parseMoney(textFrom(row.children[3])) || 0);
+      const unitPrice = Number(row.dataset.unitPrice || (qty ? amount / qty : 0)) || 0;
       const priority = row.dataset.priority || 'Normal';
       const delivery = row.dataset.delivery || 'Scheduled';
-      const status = textFrom(row.children[6]);
-      const date = textFrom(row.children[7]);
+      const status = textFrom(row.children[5]);
+      const date = textFrom(row.children[6]);
       const category = row.dataset.brand || row.dataset.category || 'General Procurement';
       const items = getPoItems(row);
       return {type, key:po, title:`Purchase Order · ${po}`, po, supplier, category, item, items, qty, amount, unitPrice:unitPrice ? money(unitPrice) : '—', delivery, priority, status, date, time:row.dataset.time || '09:00 AM', expected:row.dataset.expected || '—', requestedBy:row.dataset.requestedBy || 'Procurement Team', remarks:row.dataset.remarks || 'Standard purchase order workflow.'};
@@ -239,7 +241,7 @@
   function updateRowStatus(row, status){
     const type = getTableType(row);
     row.dataset.status = String(status || '').toLowerCase().replace(/\s+/g,'-');
-    const pillCell = type === 'delivery' ? row.children[5] : (type === 'invoice' ? row.children[4] : (type === 'req' ? row.children[6] : row.children[6]));
+    const pillCell = type === 'delivery' ? row.children[5] : (type === 'invoice' ? row.children[4] : (type === 'po' ? row.children[5] : row.children[6]));
     if(pillCell) pillCell.innerHTML = statusPill(status);
   }
   function renderViewRecord(row){
@@ -393,11 +395,11 @@
       row.dataset.delivery = d.delivery || 'Scheduled';
       row.children[1].innerHTML = supplierPill(d.supplier);
       row.children[2].textContent = d.item || '—';
-      row.children[3].innerHTML = `<b>${money(unitPrice)}</b>`;
-      row.children[4].innerHTML = `<b>${money(amount)}</b>`;
-      row.children[5].innerHTML = priorityBadge(d.priority || 'Normal');
-      row.children[6].innerHTML = statusPill(d.status);
-      row.children[7].textContent = d.date;
+      // Unit price column was removed: 3 total amount, 4 priority, 5 status, 6 date.
+      row.children[3].innerHTML = `<b>${money(amount)}</b>`;
+      row.children[4].innerHTML = priorityBadge(d.priority || 'Normal');
+      row.children[5].innerHTML = statusPill(d.status);
+      row.children[6].textContent = d.date;
       row.dataset.status = String(d.status || '').toLowerCase();
       // Persist PO update to backend if we have an id
       const id = row.dataset.id;
@@ -588,5 +590,17 @@
     if(idx === 0) openViewModal(btn);
     else if(idx === 1) openEditModal(row);
     else if(idx === 2) openDeleteModal(row);
+  });
+  // Clicking anywhere on a table row (not just the eye/track button) opens that
+  // record's details. Clicks on the action buttons or on interactive controls
+  // are ignored so their own handlers still run.
+  document.addEventListener('click', (e)=>{
+    if(e.target.closest('.row-actions')) return;
+    if(e.target.closest('button, input, select, textarea, label, a[href]')) return;
+    const row = e.target.closest('table tbody tr');
+    if(!row || !row.querySelector('.row-actions')) return;
+    const tableId = row.closest('table')?.id;
+    if(tableId === 'deliveries-table') openTrackModal(row);
+    else openViewModal(row);
   });
   document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape'){ closeViewModal(); closeEditModal(); closeDeleteModal(); } });

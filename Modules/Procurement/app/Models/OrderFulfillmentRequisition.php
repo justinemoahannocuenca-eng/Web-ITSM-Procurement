@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class OrderFulfillmentRequisition extends Model
 {
-    protected $connection = 'orderfullfillment';
+    protected $connection = 'order_fulfillment';
     protected $table = 'requisitions';
     public $timestamps = true;
     protected $primaryKey = 'id';

@@ -242,6 +242,11 @@ class PurchaseOrderController extends Controller
         $poId = $this->insertPurchaseOrder($insert);
         $savedPoNumber = $this->table('purchase_orders')->where('id', $poId)->value('po_number');
 
+        // Per-item category is only stored once the schema migration has added
+        // the column; guard so PO creation still works if it hasn't run yet.
+        $hasItemCategory = \Illuminate\Support\Facades\Schema::connection('procurement')
+            ->hasColumn('purchase_order_items', 'category');
+
         foreach ($items as $item) {
             // Best-effort link back to the supplier's catalog row (for
             // reporting); the PO item row is still fully self-contained
@@ -251,7 +256,7 @@ class PurchaseOrderController extends Controller
                 ->where('name', $item['name'])
                 ->value('id');
 
-            DB::connection('procurement')->table('purchase_order_items')->insert([
+            $itemInsert = [
                 'client_id' => (int) session('employee_client_id'),
                 'purchase_order_id' => $poId,
                 'supplier_product_id' => $supplierProductId,
@@ -261,7 +266,12 @@ class PurchaseOrderController extends Controller
                 'amount' => $item['amount'],
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+            if ($hasItemCategory) {
+                $itemInsert['category'] = $item['category'] ?? null;
+            }
+
+            DB::connection('procurement')->table('purchase_order_items')->insert($itemInsert);
         }
 
         $validated['po'] = $savedPoNumber;

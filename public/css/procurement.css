@@ -346,8 +346,15 @@
     vertical-align:middle;
   }
   .data-table tbody tr{ transition: background .15s ease; }
+  /* Rows in these tables open a details modal on click. */
+  #po-table tbody tr, #requisitions-table tbody tr, #suppliers-table tbody tr, #deliveries-table tbody tr{ cursor:pointer; }
   .data-table tbody tr:hover{ background:#fafbfd; }
   .data-table tbody tr:last-child td{ border-bottom:none; }
+  /* "+N more" chip shown next to the single item in PO rows; the remaining
+     items are visible in the row's details modal. */
+  .item-more{ display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+    background:var(--blue-soft, #eaf1ff); color:var(--blue, #2f6fed); font-size:11px; font-weight:600;
+    vertical-align:middle; }
 
   .po-link{ color:var(--blue); font-weight:600; font-family:'SF Mono', Monaco, monospace; font-size:12.5px; letter-spacing:0.3px; }
   .po-link:hover{ text-decoration:underline; }

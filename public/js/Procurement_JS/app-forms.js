@@ -265,7 +265,7 @@
 
     const currentValue = poField.value || '';
     const approvedRows = [...document.querySelectorAll('#po-table tbody tr')].filter(row => {
-      const status = String(row.dataset.status || textFrom(row.children[6]) || '').toLowerCase().trim();
+      const status = String(row.dataset.status || textFrom(row.children[5]) || '').toLowerCase().trim();
       return status === 'approved';
     });
     const noApprovedText = 'No approved purchase orders available';
@@ -284,7 +284,8 @@
           items: getPoItems(row),
           qty: row.dataset.qty || '',
           unitPrice: row.dataset.unitPrice || '',
-          status: String(row.dataset.status || textFrom(row.children[6]) || '').toLowerCase().trim(),
+          amount: row.dataset.amount || '',
+          status: String(row.dataset.status || textFrom(row.children[5]) || '').toLowerCase().trim(),
           expected: row.dataset.expected || ''
         };
         return acc;
@@ -311,6 +312,7 @@
             items: Array.isArray(item.items) ? item.items : [],
             qty: item.qty || '',
             unitPrice: item.unit_price || '',
+            amount: item.amount || '',
             status: String(item.status || 'approved').toLowerCase().trim(),
             expected: item.expected_delivery_date || ''
           };
@@ -338,7 +340,8 @@
         items: getPoItems(domRow),
         qty: domRow.dataset.qty || '',
         unitPrice: domRow.dataset.unitPrice || '',
-        status: String(domRow.dataset.status || textFrom(domRow.children[6]) || '').toLowerCase().trim(),
+        amount: domRow.dataset.amount || '',
+        status: String(domRow.dataset.status || textFrom(domRow.children[5]) || '').toLowerCase().trim(),
         expected: domRow.dataset.expected || ''
       };
     }
@@ -374,8 +377,6 @@
     form.__deliveryPoBound = true;
     const poField = form.querySelector('[name="po"]');
     const supplierField = form.querySelector('[name="supplier"]');
-    const qtyField = form.querySelector('[name="qty"]');
-    const unitPriceField = form.querySelector('[name="unit_price"]');
     const amountField = form.querySelector('[name="amount"]');
     const update = () => {
       const poNumber = (poField?.value || '').trim();
@@ -386,24 +387,14 @@
         supplierField.value = poInfo.supplier || '';
       }
       renderDeliveryItemChips(poInfo);
-      if(qtyField && (!qtyField.value || Number(qtyField.value) === 0)){
-        qtyField.value = poInfo.qty || '';
-      }
-      if(unitPriceField && (!unitPriceField.value || Number(unitPriceField.value) === 0)){
-        unitPriceField.value = poInfo.unitPrice || '';
-      }
+      // Total Amount mirrors the total amount that was ordered on the PO.
       if(amountField){
-        const qty = Number(qtyField?.value || 0);
-        const unitPrice = Number(unitPriceField?.value || 0);
-        amountField.value = qty && unitPrice ? (qty * unitPrice).toFixed(2) : amountField.value;
+        const poAmount = Number(poInfo.amount || 0);
+        if(poAmount) amountField.value = poAmount.toFixed(2);
       }
     };
     poField?.addEventListener('change', update);
     poField?.addEventListener('input', update);
-    qtyField?.addEventListener('input', update);
-    qtyField?.addEventListener('change', update);
-    unitPriceField?.addEventListener('input', update);
-    unitPriceField?.addEventListener('change', update);
   }
 
   function openAddModal(kind, reqData = null){
@@ -774,8 +765,7 @@
         tr.innerHTML = `
           <td><a class="po-link">${d.po}</a></td>
           <td>${supplierPill(d.supplier || 'Unknown Supplier')}</td>
-          <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="${htmlEscape(itemSummary)}">${htmlEscape(itemSummary || '—')}</td>
-          <td>${money(items[0].unitPrice || 0)}</td>
+          <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="${htmlEscape(itemSummary)}">${htmlEscape(items[0].name || '—')}${items.length > 1 ? `<span class="item-more">+${items.length - 1} more</span>` : ''}</td>
           <td><b>${money(amountNum)}</b></td>
           <td>${priorityBadge(priorityLabel)}</td>
           <td>${statusPill('Pending')}</td>
@@ -972,9 +962,6 @@
         return;
       }
       const shipmentNumber = json?.shipment_number || json?.data?.shipment_number || d.dr;
-      // Display only the trailing sequence (e.g. 0001); keep the full number in
-      // data-ship and the database.
-      const shipmentDisplay = (String(shipmentNumber).match(/(\d+)$/) || [null, shipmentNumber])[1];
       const table = document.querySelector('#deliveries-table tbody');
       const poRow = findPoRowByNumber(d.po || '');
       if(table){
@@ -984,16 +971,21 @@
         tr.dataset.ship = shipmentNumber;
         tr.dataset.po = d.po;
         tr.dataset.sup = d.supplier;
+        tr.dataset.items = d.items || '';
         tr.dataset.stage = stage;
         tr.dataset.note = d.remarks || `${d.items} · Qty ${d.qty}`;
         tr.dataset.carrier = 'Assigned carrier';
         tr.dataset.expected = expectedDate;
         tr.dataset.warehouse = (document.querySelector('#delivery-warehouse-select')?.selectedOptions?.[0]?.textContent || '').trim();
+        // Only the first item is shown in the table; the rest live in the
+        // tracking details modal (data-items keeps the full list).
+        const delItemsList = String(d.items || '').split(',').map(s => s.trim()).filter(Boolean);
+        const delItemsCell = `${htmlEscape(delItemsList[0] || '—')}${delItemsList.length > 1 ? `<span class="item-more">+${delItemsList.length - 1} more</span>` : ''}`;
         tr.innerHTML = `
-          <td><a class="po-link">${htmlEscape(shipmentDisplay)}</a></td>
+          <td><a class="po-link">${htmlEscape(shipmentNumber)}</a></td>
           <td><a class="po-link">${d.po}</a></td>
           <td>${supplierPill(d.supplier)}</td>
-          <td>${htmlEscape(d.items || '—')}</td>
+          <td title="${htmlEscape(d.items || '')}">${delItemsCell}</td>
           <td>${fmtDate(expectedDate)}</td>
           <td>${statusPill(statusLabel)}</td>
           <td>${fmtDate(d.delDate)}</td>
@@ -1003,7 +995,7 @@
       }
       if(poRow){
         poRow.dataset.status = 'processing';
-        poRow.children[6].innerHTML = statusPill('Processing');
+        poRow.children[5].innerHTML = statusPill('Processing');
       }
       const reqRow = findReqRowByRef(d.po);
       if(reqRow){

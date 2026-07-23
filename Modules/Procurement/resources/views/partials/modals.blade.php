@@ -83,7 +83,6 @@
     <div id="track-body"></div>
     <div class="modal-actions">
       <button class="btn btn-view" style="flex:1" onclick="closeTrackModal()">Close</button>
-      <button id="mark-received-btn" class="btn btn-approve" style="flex:1;display:none;" onclick="markReceived()">Mark Received</button>
       <button id="mark-completed-btn" class="btn btn-primary" style="flex:1;display:none;" onclick="markCompleted()">Mark Completed</button>
     </div>
   </div>
@@ -351,18 +350,9 @@
           <input type="hidden" name="items" id="delivery-items-value">
         </div>
 
-         <div class="form-field">
-          <label>Quantity<span class="req">*</span></label>
-          <input type="number" name="qty" min="0" step="1" required>
-        </div>
-       
        <div class="form-field">
-          <label>Unit Price </label>
-          <input type="text " name="unit_price" placeholder="₱0.00">
-        </div>
-       <div class="form-field">
-          <label>Total Amount </label>
-          <input type="text " name="amount" placeholder="₱0.00">
+          <label>Total Amount</label>
+          <input type="text" name="amount" placeholder="₱0.00" readonly>
         </div>
         
        

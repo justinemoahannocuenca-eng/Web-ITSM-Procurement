@@ -95,7 +95,6 @@
               <th class="sortable" data-key="po">PO NUMBER<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
               <th class="sortable" data-key="supplier">SUPPLIER<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
               <th class="sortable" data-key="item">ITEM<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-              <th>UNIT PRICE</th>
               <th>TOTAL AMOUNT</th>
               <th class="sortable" data-key="priority">PRIORITY<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
               <th class="sortable" data-key="status">STATUS<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
@@ -122,12 +121,22 @@
                     $badgeColor = $colors[$h % count($colors)];
                   }
                 @endphp
-                <tr data-id="{{ $p->id }}" data-item="{{ $p->item ?? '' }}" data-items='@json($poItemsByOrder[$p->id] ?? [])' data-qty="{{ $p->qty ?? 0 }}" data-amount="{{ $p->amount ?? 0 }}" data-unit-price="{{ $p->unit_price ?? 0 }}" data-priority="{{ $p->priority ?? 'normal' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $p->status ?? 'pending')) }}" data-expected="{{ $p->expected_delivery_date ?? '' }}" data-req-ref="{{ $p->requisition_reference ?? '' }}">
+                @php
+                  // Only the first ordered item is shown in the table; the rest are
+                  // visible in the row's details modal. Total amount is re-read from
+                  // the PO's actual item rows (falls back to the stored amount).
+                  $poItems = collect($poItemsByOrder[$p->id] ?? []);
+                  $firstItemName = $poItems->first()['name'] ?? (trim(explode(',', (string) ($p->item ?? ''))[0]) ?: '');
+                  $moreItemCount = max(0, $poItems->count() - 1);
+                  $orderedTotal = $poItems->count()
+                    ? $poItems->sum(fn($it) => (float) ($it['qty'] ?? 0) * (float) ($it['unitPrice'] ?? 0))
+                    : (float) ($p->amount ?? 0);
+                @endphp
+                <tr data-id="{{ $p->id }}" data-item="{{ $p->item ?? '' }}" data-items='@json($poItemsByOrder[$p->id] ?? [])' data-qty="{{ $p->qty ?? 0 }}" data-amount="{{ $orderedTotal }}" data-unit-price="{{ $p->unit_price ?? 0 }}" data-priority="{{ $p->priority ?? 'normal' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $p->status ?? 'pending')) }}" data-expected="{{ $p->expected_delivery_date ?? '' }}" data-req-ref="{{ $p->requisition_reference ?? '' }}">
                   <td><a class="po-link">{{ $p->po_number }}</a></td>
                   <td><div class="supplier-pill-cell"><span class="supplier-pill"><span class="supplier-badge" style="background: {{ $badgeColor }}">{{ $initials }}</span>{{ $p->supplier_name ?? '—' }}</span></div></td>
-                  <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ $p->item ?? '' }}">{{ $p->item ?? '—' }}</td>
-                  <td>₱{{ number_format($p->unit_price ?? 0, 2) }}</td>
-                  <td><b>₱{{ number_format($p->amount ?? 0, 2) }}</b></td>
+                  <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ $p->item ?? '' }}">{{ $firstItemName ?: '—' }}@if($moreItemCount > 0)<span class="item-more">+{{ $moreItemCount }} more</span>@endif</td>
+                  <td><b>₱{{ number_format($orderedTotal, 2) }}</b></td>
                   @php
                     $priorityClass = strtolower($p->priority ?? 'normal');
                     if(!in_array($priorityClass, ['urgent','high','normal','low'])) {
@@ -143,7 +152,7 @@
               @endforeach
             @else
               <tr>
-                <td colspan="9" style="text-align:center; padding:32px 16px; color:var(--text-muted);">No purchase orders yet.</td>
+                <td colspan="8" style="text-align:center; padding:32px 16px; color:var(--text-muted);">No purchase orders yet.</td>
               </tr>
             @endif
           </tbody>

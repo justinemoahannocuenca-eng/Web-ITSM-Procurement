@@ -5,6 +5,7 @@ namespace Modules\Procurement\Http\Controllers\Procurement;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
 {
@@ -63,7 +64,7 @@ class DashboardController extends Controller
         // Requisitions live on the Manufacturing / OrderFulfillment connection
         // (same source the sidebar badge uses).
         $requisitionPending = 0;
-        foreach (['orderfullfillment', 'manufacturing'] as $conn) {
+        foreach (['order_fulfillment', 'manufacturing'] as $conn) {
             try {
                 $external = DB::connection($conn);
                 if ($external->getSchemaBuilder()->hasTable('requisitions')) {
@@ -144,22 +145,41 @@ class DashboardController extends Controller
             ? $table('suppliers')->whereIn('id', $deliverySupplierIds)->pluck('name', 'id')->all()
             : [];
 
-        // purchase_orders.brand now holds each PO's Category (see the PO
-        // modal's Category field) — aliased to `category` here so the whole
-        // "Spend by Category" feature reads naturally end-to-end.
-        $spendByCategoryAll = $table('purchase_orders')
-            ->select('brand as category', DB::raw('SUM(amount) as total'))
-            ->whereNotNull('brand')
-            ->where('brand', '!=', '')
-            ->groupBy('brand')
-            ->orderByDesc('total')
-            ->get()
-            ->map(function ($row) {
-                $row->formatted_total = $this->compactPeso($row->total);
+        // "Spend by Category" is split per ordered item's category
+        // (purchase_order_items.category). Until the schema migration adds that
+        // column, fall back to each PO's primary category stored in `brand`.
+        $hasItemCategory = Schema::connection('procurement')
+            ->hasColumn('purchase_order_items', 'category');
 
-                return $row;
-            })
-            ->values();
+        if ($hasItemCategory) {
+            $spendByCategoryAll = $table('purchase_order_items')
+                ->select('purchase_order_items.category as category', DB::raw('SUM(purchase_order_items.amount) as total'))
+                ->whereNotNull('purchase_order_items.category')
+                ->where('purchase_order_items.category', '!=', '')
+                ->groupBy('purchase_order_items.category')
+                ->orderByDesc('total')
+                ->get()
+                ->map(function ($row) {
+                    $row->formatted_total = $this->compactPeso($row->total);
+
+                    return $row;
+                })
+                ->values();
+        } else {
+            $spendByCategoryAll = $table('purchase_orders')
+                ->select('brand as category', DB::raw('SUM(amount) as total'))
+                ->whereNotNull('brand')
+                ->where('brand', '!=', '')
+                ->groupBy('brand')
+                ->orderByDesc('total')
+                ->get()
+                ->map(function ($row) {
+                    $row->formatted_total = $this->compactPeso($row->total);
+
+                    return $row;
+                })
+                ->values();
+        }
 
         // Top 5 for the compact dashboard panel; the full list feeds the
         // "View all" modal.

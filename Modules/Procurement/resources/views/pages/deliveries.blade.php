@@ -123,13 +123,19 @@
                       $badgeColor = $colors[$h % count($colors)];
                     }
                   @endphp
-                  <tr data-id="{{ $d->id }}" data-ship="{{ $d->shipment_number }}" data-po="{{ $d->po_number ?? '' }}" data-sup="{{ $d->supplier_name ?? '' }}" data-stage="{{ $d->stage ?? '' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $d->status ?? 'intransit')) }}" data-date="{{ $d->delivery_date ?? '' }}" data-warehouse="{{ $d->deliver_to_warehouse ?? '' }}">
-                    {{-- Display only the trailing sequence (e.g. 0001); the full
-                         shipment_number stays in data-ship and the database. --}}
-                    <td><a class="po-link">{{ preg_match('/(\d+)$/', (string) $d->shipment_number, $m) ? $m[1] : $d->shipment_number }}</a></td>
+                  @php
+                    // Only the first purchased item is shown in the table; the rest
+                    // are visible in the shipment's tracking details modal.
+                    $delItems = array_values(array_filter(array_map('trim', explode(',', (string) ($d->items ?? '')))));
+                    $delFirstItem = $delItems[0] ?? '';
+                    $delMoreCount = max(0, count($delItems) - 1);
+                  @endphp
+                  <tr data-id="{{ $d->id }}" data-ship="{{ $d->shipment_number }}" data-po="{{ $d->po_number ?? '' }}" data-sup="{{ $d->supplier_name ?? '' }}" data-items="{{ $d->items ?? '' }}" data-stage="{{ $d->stage ?? '' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $d->status ?? 'intransit')) }}" data-date="{{ $d->delivery_date ?? '' }}" data-warehouse="{{ $d->deliver_to_warehouse ?? '' }}">
+                    {{-- Show the full shipment number (e.g. SHP-2026-0001). --}}
+                    <td><a class="po-link">{{ $d->shipment_number }}</a></td>
                     <td><a class="po-link">{{ $d->po_number ?? '—' }}</a></td>
                     <td><div class="supplier-pill-cell"><span class="supplier-pill"><span class="supplier-badge" style="background: {{ $badgeColor }}">{{ $initials }}</span>{{ $d->supplier_name ?? '—' }}</span></div></td>
-                    <td>{{ $d->items ?? '—' }}</td>
+                    <td title="{{ $d->items ?? '' }}">{{ $delFirstItem ?: '—' }}@if($delMoreCount > 0)<span class="item-more">+{{ $delMoreCount }} more</span>@endif</td>
                     <td>{{ $d->estimated_arrival ?? $d->delivery_date ?? '' }}</td>
                     <td><span class="status-pill {{ strtolower(str_replace([' ', '_'], '-', $d->status ?? 'intransit')) }}">{{ ucwords(str_replace('-', ' ', $d->status ?? 'intransit')) }}</span></td>
                     <td>{{ $d->delivery_date ?? '' }}</td>
