@@ -39,7 +39,7 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/><rect x="13" y="3" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/><rect x="3" y="13" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/><rect x="13" y="13" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/></svg>Dashboard
     </a>
     <a href="{{ route('procurement.purchase-orders.index') }}" class="nav-item {{ request()->routeIs('procurement.purchase-orders.*') ? 'active' : '' }}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2"/><path d="M8 9h8M8 13h8" stroke="currentColor" stroke-width="2"/></svg>Purchase Orders<span class="nav-badge">0</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2"/><path d="M8 9h8M8 13h8" stroke="currentColor" stroke-width="2"/></svg>Purchase Orders<span class="nav-badge {{ (($pendingPoCount ?? 0) > 0) ? 'red' : '' }}">{{ $pendingPoCount ?? 0 }}</span>
     </a>
     <a href="{{ route('procurement.suppliers.index') }}" class="nav-item {{ request()->routeIs('procurement.suppliers.*') ? 'active' : '' }}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 21V8l9-5 9 5v13" stroke="currentColor" stroke-width="2"/><path d="M9 21v-6h6v6" stroke="currentColor" stroke-width="2"/></svg>Suppliers

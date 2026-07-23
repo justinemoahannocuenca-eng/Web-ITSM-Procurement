@@ -607,11 +607,45 @@
   .modal-actions{ display:flex; gap:10px; margin-top:20px; }
   .modal-actions .btn{ flex:1; padding:10px; font-size:13px; }
 
-  /* ===== Add / Form modal ===== */
-  .modal-box.form-modal{ width:760px; max-height:90vh; overflow:hidden; }
-  .modal-box.form-modal-lg{ width:760px; max-height:90vh; overflow:hidden; }
+  /* ===== Add / Form modal =====
+     Header + footer stay fixed; the field area (.form-grid, or #edit-modal-body
+     for the Edit modal) is the scrollable region, so long forms (multi-item PO,
+     product lists) scroll inside the modal instead of overflowing the screen. */
+  .modal-box.form-modal,
+  .modal-box.form-modal-lg{
+    width:760px; max-height:90vh; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
   .modal-box.confirm-modal{ width:520px; }
+  .modal-box.form-modal .modal-head,
+  .modal-box.form-modal-lg .modal-head{ flex-shrink:0; }
+  .modal-box.form-modal form,
+  .modal-box.form-modal-lg form{
+    display:flex; flex-direction:column; flex:1; min-height:0;
+  }
+  .modal-box.form-modal .modal-actions,
+  .modal-box.form-modal-lg .modal-actions{ flex-shrink:0; }
+  .modal-box.form-modal .form-grid,
+  .modal-box.form-modal-lg .form-grid,
+  #edit-modal-body{
+    flex:1; min-height:0; overflow-y:auto; padding-right:2px;
+  }
   .modal-box.form-modal .form-grid{ margin-bottom:0; }
+
+  /* View modal body also scrolls (item/product chips can get long). */
+  #modal-body{ max-height:60vh; overflow-y:auto; }
+
+  /* Every scrollable modal region keeps scrolling but hides the scrollbar. */
+  .form-grid, #edit-modal-body, #modal-body, #spend-by-category-modal-list{
+    scrollbar-width:none;        /* Firefox */
+    -ms-overflow-style:none;     /* legacy Edge/IE */
+  }
+  .form-grid::-webkit-scrollbar,
+  #edit-modal-body::-webkit-scrollbar,
+  #modal-body::-webkit-scrollbar,
+  #spend-by-category-modal-list::-webkit-scrollbar{
+    display:none;                /* Chrome/Safari/new Edge */
+  }
   .detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
   .detail-grid .full{ grid-column:1 / -1; }
   .detail-card{ background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:14px; }
@@ -825,19 +859,27 @@
   /* Donut Chart Container */
   .dash-grid-3 .panel .donut-chart-container{
     position:relative;
-    width:160px;
-    height:160px;
+    width:200px;          /* match the 200x200 canvas so the center overlay lines up */
+    max-width:100%;
+    aspect-ratio:1 / 1;
     margin:0 auto 16px;
   }
   .dash-grid-3 .panel .donut-chart-container canvas{
     display:block;
+    width:100%;
+    height:100%;
   }
   .dash-grid-3 .panel .donut-center{
     position:absolute;
     top:50%;
     left:50%;
     transform:translate(-50%, -50%);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
     text-align:center;
+    width:100%;
     pointer-events:none;
   }
   .dash-grid-3 .panel .donut-center-val{
@@ -883,7 +925,7 @@
     font-weight:700;
   }
   
-  /* Chart Bar List (Spend by Brand) */
+  /* Chart Bar List (Spend by Category) */
   .dash-grid-3 .panel .chart-bar-list{
     display:flex;
     flex-direction:column;
@@ -1095,3 +1137,148 @@
       transition-duration:0.001ms !important; scroll-behavior:auto !important;
     }
   }
+
+/* ============================================================
+   Dashboard extras ported from nexora-app
+   (horizontal spend bars, donut hover tooltip, legend active,
+    "View all" spend-by-category action)
+   ============================================================ */
+.dash-grid-3 .panel .donut-legend-item.active{ background:var(--bg); }
+
+.donut-tooltip{
+  position:absolute;
+  pointer-events:none;
+  transform:translate(-50%, -130%);
+  background:var(--text, #1a2338);
+  color:#fff;
+  font-size:11px;
+  font-weight:600;
+  padding:5px 9px;
+  border-radius:6px;
+  white-space:nowrap;
+  opacity:0;
+  transition:opacity .12s ease;
+  z-index:5;
+}
+.donut-tooltip.show{ opacity:1; }
+
+/* Spend by Category — horizontal bars: label+value on top, bar below */
+.chart-bar-list-h{ gap:14px; }
+.chart-bar-item-h{ display:flex; flex-direction:column; gap:6px; }
+.chart-bar-item-h-top{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px;
+}
+.panel-sub-action{
+  float:right;
+  color:var(--blue);
+  font-weight:600;
+  text-decoration:none;
+}
+
+/* Supplier product editor — inline editable name/price (ported from nexora-app) */
+.product-chip-edit{ width:100%; flex:1 1 100%; border-radius:10px; padding:8px 10px; gap:10px; background:#f7fafd; }
+.product-chip-name{ flex:1; min-width:0; border:1px solid #d7dde8; border-radius:7px; padding:6px 9px; font-size:12.5px; color:var(--text); background:#fff; outline:none; }
+.product-chip-name:focus{ border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12); }
+.product-chip-sku{ color:var(--muted); font-size:10.5px; white-space:nowrap; flex-shrink:0; }
+.product-chip-price{ display:inline-flex; align-items:center; gap:2px; font-size:12.5px; color:var(--text); flex-shrink:0; }
+.product-chip-price-input{ width:80px; border:1px solid #d7dde8; border-radius:7px; padding:6px 8px; font-size:12.5px; color:var(--text); background:#fff; outline:none; }
+.product-chip-price-input:focus{ border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12); }
+
+/* ============================================================
+   Spend by Category — vertical bar chart (dashboard panel)
+   ============================================================ */
+.vbar-chart{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-around;
+  gap:12px;
+  height:190px;
+  padding:8px 4px 0;
+}
+.vbar-col{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-end;
+  flex:1 1 0;
+  min-width:0;
+  height:100%;
+}
+.vbar-value{
+  font-size:11px;
+  font-weight:700;
+  color:var(--muted);
+  margin-bottom:6px;
+  white-space:nowrap;
+}
+.vbar-track{
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  width:100%;
+  flex:1 1 auto;
+  min-height:0;
+}
+.vbar-fill{
+  width:60%;
+  max-width:40px;
+  min-height:4px;
+  background:linear-gradient(180deg, #6ea0f5, var(--blue));
+  border-radius:6px 6px 0 0;
+  transition:height .6s cubic-bezier(.22,1,.36,1);
+}
+.vbar-label{
+  font-size:11px;
+  font-weight:600;
+  color:var(--text);
+  margin-top:8px;
+  max-width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  text-align:center;
+}
+
+/* Live nav-badge update animation (sidebar counts) */
+@keyframes badgePulse {
+  0%   { transform:scale(1); }
+  40%  { transform:scale(1.35); }
+  100% { transform:scale(1); }
+}
+.nav-badge.badge-pulse{ animation: badgePulse .4s ease; }
+
+/* ============================================================
+   PO modal — multi-item rows (Category -> Item cascading)
+   ============================================================ */
+.po-item-row{
+  display:grid;
+  grid-template-columns: 1.2fr 1.2fr 70px 110px 110px 28px;
+  gap:10px;
+  align-items:end;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--bg);
+  margin-bottom:10px;
+}
+.po-item-row .form-field{ gap:4px; }
+.po-item-row .form-field label{ font-size:10.5px; }
+.po-item-remove{
+  width:26px; height:26px; border-radius:7px; border:none;
+  background:#fdecec; color:var(--red); cursor:pointer; font-size:14px; line-height:1;
+  display:flex; align-items:center; justify-content:center;
+}
+.po-item-remove:hover{ background:#f8d2d2; }
+@media (max-width: 720px){
+  .po-item-row{ grid-template-columns: 1fr 1fr; }
+}
+
+/* Add Product modal + editable product chip — Category field */
+.product-chip-category-input{
+  width:100px; border:1px solid #d7dde8; border-radius:7px; padding:6px 8px;
+  font-size:11.5px; color:var(--text); background:#fff; outline:none;
+}
+.product-chip-category-input:focus{ border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12); }

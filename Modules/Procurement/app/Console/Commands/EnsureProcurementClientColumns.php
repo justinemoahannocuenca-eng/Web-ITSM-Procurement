@@ -61,6 +61,25 @@ class EnsureProcurementClientColumns extends Command
             $this->info('Added warehouse_id to Procurement suppliers.');
         }
 
+        // Deliveries record which Inventory warehouse the shipment is delivered to.
+        if ($schema->hasTable('deliveries') && ! $schema->hasColumn('deliveries', 'deliver_to_warehouse')) {
+            $schema->table('deliveries', function (Blueprint $table): void {
+                $table->string('deliver_to_warehouse')->nullable();
+            });
+
+            $this->info('Added deliver_to_warehouse to Procurement deliveries.');
+        }
+
+        // Supplier product category (drives the PO modal's supplier -> category
+        // -> item cascading selection).
+        if ($schema->hasTable('supplier_products') && ! $schema->hasColumn('supplier_products', 'categories')) {
+            $schema->table('supplier_products', function (Blueprint $table): void {
+                $table->string('categories', 100)->nullable();
+            });
+
+            $this->info('Added categories to Procurement supplier_products.');
+        }
+
         return self::SUCCESS;
     }
 }

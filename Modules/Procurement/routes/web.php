@@ -17,6 +17,9 @@ use Modules\Procurement\Http\Controllers\Procurement\DeliveryController;
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+// Lightweight JSON counts for live (no-refresh) dashboard cards + sidebar badges.
+Route::get('/live-stats', [DashboardController::class, 'liveStats'])->name('live-stats');
+
 Route::post('/logout', function () {
     session()->forget(['employee_logged_in', 'employee_role', 'employee_id', 'employee_name', 'employee_email', 'employee_department', 'employee_position', 'employee_client_id']);
     return redirect()->route('login');

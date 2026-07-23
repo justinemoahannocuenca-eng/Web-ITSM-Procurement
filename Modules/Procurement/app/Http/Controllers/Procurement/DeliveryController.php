@@ -9,11 +9,23 @@ use Modules\Procurement\Models\Requisition;
 use Modules\Procurement\Models\Supplier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Illuminate\Database\QueryException;
 
 class DeliveryController extends Controller
 {
+    private function table(string $name)
+    {
+        $query = DB::connection('procurement')->table($name);
+
+        if (! (config('nexora.root_admin_module_testing') && auth()->user()?->role === 'root_admin')) {
+            $query->where($name.'.client_id', (int) session('employee_client_id'));
+        }
+
+        return $query;
+    }
+
     private function nextAvailableShipmentNumber(string $requestedNumber): string
     {
         if (! preg_match('/^(.*?)(\d+)$/', $requestedNumber, $matches)) {
@@ -61,7 +73,16 @@ class DeliveryController extends Controller
 
     public function index(): View
     {
-        $deliveries = Delivery::with(['supplier', 'purchaseOrder'])->orderBy('delivery_date')->get();
+        // Raw tenant-scoped query with joins so the table gets flat
+        // supplier_name / po_number columns (the Blade reads $d->supplier_name
+        // and $d->po_number; the eager-loaded model relations don't expose
+        // those, which is why supplier and PO showed as "—").
+        $deliveries = $this->table('deliveries')
+            ->leftJoin('suppliers', 'deliveries.supplier_id', '=', 'suppliers.id')
+            ->leftJoin('purchase_orders', 'deliveries.purchase_order_id', '=', 'purchase_orders.id')
+            ->select('deliveries.*', 'suppliers.name as supplier_name', 'purchase_orders.po_number as po_number')
+            ->orderBy('deliveries.delivery_date')
+            ->get();
 
         $counts = [
             'all' => $deliveries->count(),
@@ -76,8 +97,10 @@ class DeliveryController extends Controller
         // Next shipment sequence, derived from the highest existing
         // "SHP-#####" number, so the "+ Log Delivery" form always
         // auto-fills the true next number instead of a hardcoded guess.
+        // Only the trailing number group — never the year — so "SHP-2026-0231"
+        // yields 231, not 20260231.
         $nextShipmentSeq = ($deliveries->pluck('shipment_number')
-            ->map(fn (string $n) => (int) preg_replace('/\D/', '', $n))
+            ->map(fn ($n) => preg_match('/(\d+)$/', (string) $n, $m) ? (int) $m[1] : 0)
             ->max() ?? 0) + 1;
 
         return view('procurement::pages.deliveries', compact('deliveries', 'counts', 'nextShipmentSeq'));
@@ -94,7 +117,16 @@ class DeliveryController extends Controller
             'qty' => ['required', 'integer', 'min:1'],
             'status' => ['nullable', 'string', 'in:intransit,delayed'],
             'remarks' => ['nullable', 'string'],
+            'warehouse_id' => ['nullable', 'integer'],
         ]);
+
+        $warehouse = null;
+        if (! empty($data['warehouse_id'])) {
+            $warehouse = \Modules\Inventory\Models\Warehouse::query()
+                ->whereKey((int) $data['warehouse_id'])
+                ->where('status', 'active')
+                ->first();
+        }
 
         $purchaseOrder = PurchaseOrder::where('po_number', $data['po'])->first();
         $supplier = Supplier::where('name', $data['supplier'])->first();
@@ -112,6 +144,7 @@ class DeliveryController extends Controller
         }
 
         $delivery = $this->createDeliveryWithUniqueShipmentNumber([
+            'client_id' => (int) session('employee_client_id'),
             'shipment_number' => $data['dr'],
             'purchase_order_id' => $purchaseOrder?->id,
             'supplier_id' => $supplier->id,
@@ -122,6 +155,9 @@ class DeliveryController extends Controller
             'remarks' => $data['remarks'] ?? null,
             'delivery_date' => $data['delDate'],
             'estimated_arrival' => $purchaseOrder?->expected_delivery_date,
+            // The selected warehouse's name is stored in the deliver_to_warehouse
+            // column so the shipment record shows where it's being delivered.
+            'deliver_to_warehouse' => $warehouse?->name,
         ]);
 
         if ($purchaseOrder) {

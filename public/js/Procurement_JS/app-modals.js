@@ -117,6 +117,15 @@
     try { return JSON.parse(raw); } catch { return []; }
   }
 
+  // Item rows attached to a PO row (data-items, JSON) — same "products as
+  // chips" pattern as getSupplierProducts, used for the View PO chips and the
+  // Log Delivery modal's item chips.
+  function getPoItems(row){
+    const raw = row?.dataset?.items || '';
+    if(!raw) return [];
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+  }
+
   function getSupplierCatalogEntry(name){
     const key = String(name || '').trim();
     if(!key) return null;
@@ -129,7 +138,7 @@
     if(supplierRow){
       const rowBrand = supplierRow.dataset.category || supplierRow.dataset.brand || '';
       const products = getSupplierProducts(supplierRow);
-      const entry = { brand: rowBrand || key, products: products.map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0) })) };
+      const entry = { brand: rowBrand || key, products: products.map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0), category: p.category || '' })) };
       // cache for later
       window.SUPPLIER_CATALOG = window.SUPPLIER_CATALOG || {};
       window.SUPPLIER_CATALOG[key] = entry;
@@ -167,7 +176,8 @@
       const status = textFrom(row.children[6]);
       const date = textFrom(row.children[7]);
       const category = row.dataset.brand || row.dataset.category || 'General Procurement';
-      return {type, key:po, title:`Purchase Order · ${po}`, po, supplier, category, item, qty, amount, unitPrice:unitPrice ? money(unitPrice) : '—', delivery, priority, status, date, time:row.dataset.time || '09:00 AM', expected:row.dataset.expected || '—', requestedBy:row.dataset.requestedBy || 'Procurement Team', remarks:row.dataset.remarks || 'Standard purchase order workflow.'};
+      const items = getPoItems(row);
+      return {type, key:po, title:`Purchase Order · ${po}`, po, supplier, category, item, items, qty, amount, unitPrice:unitPrice ? money(unitPrice) : '—', delivery, priority, status, date, time:row.dataset.time || '09:00 AM', expected:row.dataset.expected || '—', requestedBy:row.dataset.requestedBy || 'Procurement Team', remarks:row.dataset.remarks || 'Standard purchase order workflow.'};
     }
     if(type === 'supplier'){
       const name = supplierNameFromCell(row.children[0]);
@@ -177,7 +187,7 @@
     }
     if(type === 'req'){
       const ref = textFrom(row.children[0]);
-      return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1'};
+      return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, priority:row.dataset.priority || 'Normal', delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1'};
     }
     if(type === 'invoice'){
       const inv = textFrom(row.children[0]);
@@ -238,7 +248,8 @@
     setViewModalHeader(row, record);
     let body = '';
     if(record.type === 'po'){
-      body = `<div class="detail-grid"><div class="detail-card"><h4>Order overview</h4><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Brand</span><span>${htmlEscape(record.category)}</span></div><div class="modal-row"><span>Item</span><span>${htmlEscape(record.item)}</span></div><div class="modal-row"><span>Quantity</span><span>${record.qty || '—'}</span></div></div><div class="detail-card"><h4>Commercial details</h4><div class="modal-row"><span>Total amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Unit price</span><span>${record.unitPrice}</span></div><div class="modal-row"><span>Priority</span><span>${priorityBadge(record.priority || 'Normal')}</span></div><div class="modal-row"><span>Delivery status</span><span>${htmlEscape(record.delivery)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div><div class="modal-row"><span>Date & time</span><span>${htmlEscape(record.date)} · ${htmlEscape(record.time)}</span></div></div><div class="detail-card full"><h4>Workflow</h4><div class="modal-row"><span>Requested by</span><span>${htmlEscape(record.requestedBy)}</span></div><div class="modal-row"><span>Expected delivery</span><span>${htmlEscape(record.expected)}</span></div></div></div><div class="detail-note"><b>Remarks</b><br>${htmlEscape(record.remarks)}</div>`;
+      const poItemsMarkup = record.items?.length ? `<div class="supplier-product-inline">${record.items.map(it => `<span class="supplier-product-tag">${htmlEscape(it.name || 'Item')} · Qty ${Number(it.qty||0)}${it.unitPrice ? ' · ₱'+Number(it.unitPrice).toFixed(2) : ''}</span>`).join('')}</div>` : `<div class="modal-helper">${htmlEscape(record.item)}</div>`;
+      body = `<div class="detail-grid"><div class="detail-card"><h4>Order overview</h4><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Category</span><span>${htmlEscape(record.category)}</span></div><div class="modal-row"><span>Total quantity</span><span>${record.qty || '—'}</span></div></div><div class="detail-card"><h4>Commercial details</h4><div class="modal-row"><span>Total amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Unit price</span><span>${record.unitPrice}</span></div><div class="modal-row"><span>Priority</span><span>${priorityBadge(record.priority || 'Normal')}</span></div><div class="modal-row"><span>Delivery status</span><span>${htmlEscape(record.delivery)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div><div class="modal-row"><span>Date & time</span><span>${htmlEscape(record.date)} · ${htmlEscape(record.time)}</span></div></div><div class="detail-card full"><h4>Items</h4>${poItemsMarkup}</div><div class="detail-card full"><h4>Workflow</h4><div class="modal-row"><span>Requested by</span><span>${htmlEscape(record.requestedBy)}</span></div><div class="modal-row"><span>Expected delivery</span><span>${htmlEscape(record.expected)}</span></div></div></div><div class="detail-note"><b>Remarks</b><br>${htmlEscape(record.remarks)}</div>`;
       const statusKey = String(record.status || '').toLowerCase();
       if(statusKey === 'pending'){
         setViewActions(
@@ -257,7 +268,7 @@
         );
       }
     } else if(record.type === 'supplier'){
-      const productsMarkup = record.products?.length ? `<div class="supplier-product-inline">${record.products.map(p => `<span class="supplier-product-tag">${htmlEscape(p.name || 'Product')} · ${htmlEscape(p.sku || 'SKU')} · ₱${Number(p.price || 0).toFixed(2)}</span>`).join('')}</div>` : '<div class="modal-helper">No products added.</div>';
+      const productsMarkup = record.products?.length ? `<div class="supplier-product-inline">${record.products.map(p => `<span class="supplier-product-tag">${htmlEscape(p.name || 'Product')}${p.category ? ' · '+htmlEscape(p.category) : ''} · ${htmlEscape(p.sku || 'SKU')} · ₱${Number(p.price || 0).toFixed(2)}</span>`).join('')}</div>` : '<div class="modal-helper">No products added.</div>';
       body = `<div class="detail-grid"><div class="detail-card"><h4>Supplier profile</h4><div class="modal-row"><span>Name</span><span>${htmlEscape(record.name)}</span></div><div class="modal-row"><span>Contact</span><span>${htmlEscape(record.contact)}</span></div><div class="modal-row"><span>Email</span><span>${htmlEscape(record.email)}</span></div><div class="modal-row"><span>Phone</span><span>${htmlEscape(record.phone)}</span></div></div><div class="detail-card"><h4>Commercial profile</h4><div class="modal-row"><span>Brand</span><span>${htmlEscape(record.category)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div><div class="modal-row"><span>Payment terms</span><span>${htmlEscape(record.terms)}</span></div><div class="modal-row"><span>Last activity</span><span>${htmlEscape(record.lastActivity)}</span></div></div><div class="detail-card full"><h4>Products</h4>${productsMarkup}</div><div class="detail-card full"><h4>Address</h4><div style="font-size:13px; line-height:1.55;">${htmlEscape(record.address)}</div></div></div>`;
       setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null);
     } else if(record.type === 'req'){
@@ -294,7 +305,7 @@
     if(record.type === 'po') return `
       <div class="form-field"><label>PO number</label><input name="po" value="${htmlEscape(record.po)}" readonly></div>
       <div class="form-field"><label>Supplier</label><input name="supplier" value="${htmlEscape(record.supplier)}"></div>
-      <div class="form-field"><label>Brand</label><input name="category" value="${htmlEscape(record.category)}"></div>
+      <div class="form-field"><label>Category</label><input name="category" value="${htmlEscape(record.category)}"></div>
       <div class="form-field"><label>Item</label><input name="item" value="${htmlEscape(record.item)}"></div>
       <div class="form-field"><label>Quantity</label><input type="number" min="0" name="qty" value="${record.qty}"></div>
       <div class="form-field"><label>Total amount</label><input type="number" min="0" step="0.01" name="amount" value="${record.amount}"></div>

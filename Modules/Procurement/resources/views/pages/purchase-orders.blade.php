@@ -122,10 +122,10 @@
                     $badgeColor = $colors[$h % count($colors)];
                   }
                 @endphp
-                <tr data-id="{{ $p->id }}" data-item="{{ $p->item ?? '' }}" data-qty="{{ $p->qty ?? 0 }}" data-amount="{{ $p->amount ?? 0 }}" data-unit-price="{{ $p->unit_price ?? 0 }}" data-priority="{{ $p->priority ?? 'normal' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $p->status ?? 'pending')) }}" data-expected="{{ $p->expected_delivery_date ?? '' }}" data-req-ref="{{ $p->requisition_reference ?? '' }}">
+                <tr data-id="{{ $p->id }}" data-item="{{ $p->item ?? '' }}" data-items='@json($poItemsByOrder[$p->id] ?? [])' data-qty="{{ $p->qty ?? 0 }}" data-amount="{{ $p->amount ?? 0 }}" data-unit-price="{{ $p->unit_price ?? 0 }}" data-priority="{{ $p->priority ?? 'normal' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $p->status ?? 'pending')) }}" data-expected="{{ $p->expected_delivery_date ?? '' }}" data-req-ref="{{ $p->requisition_reference ?? '' }}">
                   <td><a class="po-link">{{ $p->po_number }}</a></td>
                   <td><div class="supplier-pill-cell"><span class="supplier-pill"><span class="supplier-badge" style="background: {{ $badgeColor }}">{{ $initials }}</span>{{ $p->supplier_name ?? '—' }}</span></div></td>
-                  <td>{{ $p->item ?? '—' }}</td>
+                  <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ $p->item ?? '' }}">{{ $p->item ?? '—' }}</td>
                   <td>₱{{ number_format($p->unit_price ?? 0, 2) }}</td>
                   <td><b>₱{{ number_format($p->amount ?? 0, 2) }}</b></td>
                   @php

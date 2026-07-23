@@ -62,16 +62,23 @@
       .map(row => {
         const supplierName = supplierNameFromCell(row.children[0]) || textFrom(row.children[0]);
         if(!supplierName) return null;
-        return { name: supplierName, brand: row.dataset.category || row.dataset.brand || '', warehouseId: row.dataset.warehouseId || '' };
+        return { name: supplierName, brand: row.dataset.category || row.dataset.brand || '', warehouseId: row.dataset.warehouseId || '', products: getSupplierProducts(row) };
       })
       .filter(Boolean);
     if(supplierRows.length > 0){
       supplierField.innerHTML = '<option value="">Select supplier...</option>' + supplierRows.map(s => `<option value="${htmlEscape(s.name)}">${htmlEscape(s.name)}</option>`).join('');
       supplierField.value = supplierRows.some(s => s.name === selectedSupplier) ? selectedSupplier : '';
-      // populate client-side catalog from rows
+      // populate client-side catalog from rows (with each product's category,
+      // used by the PO modal's supplier -> category -> item cascade)
       window.SUPPLIER_CATALOG = window.SUPPLIER_CATALOG || {};
-      supplierRows.forEach(s => { if(!window.SUPPLIER_CATALOG[s.name]) window.SUPPLIER_CATALOG[s.name] = { brand: s.brand || s.name, warehouseId: s.warehouseId || '', products: [] }; });
-      populatePoItemSelect(form);
+      supplierRows.forEach(s => {
+        window.SUPPLIER_CATALOG[s.name] = {
+          brand: s.brand || s.name,
+          warehouseId: s.warehouseId || '',
+          products: s.products.map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0), category: p.category || '' }))
+        };
+      });
+      refreshAllPoItemRowsForSupplier(modal);
       refreshDeliverySupplierOptions();
       return Promise.resolve();
     }
@@ -84,9 +91,9 @@
         supplierField.value = list.some(s => s.name === selectedSupplier) ? selectedSupplier : '';
         window.SUPPLIER_CATALOG = window.SUPPLIER_CATALOG || {};
         list.forEach(s => {
-          window.SUPPLIER_CATALOG[s.name] = { brand: s.brand || s.name, warehouseId: s.warehouse_id || '', products: (s.products || []).map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0) })) };
+          window.SUPPLIER_CATALOG[s.name] = { brand: s.brand || s.name, warehouseId: s.warehouse_id || '', products: (s.products || []).map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0), category: p.category || '' })) };
         });
-        populatePoItemSelect(form);
+        refreshAllPoItemRowsForSupplier(modal);
         refreshDeliverySupplierOptions();
       }).catch(() => {
         // ignore errors; leave supplierField as-is
@@ -107,29 +114,138 @@
     supplierField.appendChild(option);
   }
 
-  function populatePoItemSelect(form, selectedItem = ''){
-    const supplierField = form?.querySelector('[name="supplier"]');
-    const itemField = form?.querySelector('[name="item"]');
-    const brandField = form?.querySelector('[name="brand"]');
-    const warehouseField = form?.querySelector('[name="warehouse_id"]');
+  /* ---------- PO multi-item rows: Category -> Item cascading ---------- */
+  // Categories come from the currently-selected supplier's products. A
+  // product with no category is bucketed as "Uncategorized" so older catalog
+  // entries (saved before the category field existed) stay selectable.
+  function supplierCategoriesFor(entry){
+    const cats = (entry?.products || []).map(p => String(p.category || '').trim() || 'Uncategorized');
+    return [...new Set(cats)];
+  }
+  function itemsForCategory(entry, category){
+    const target = String(category || '').trim().toLowerCase();
+    return (entry?.products || []).filter(p => (String(p.category || '').trim() || 'Uncategorized').toLowerCase() === target);
+  }
+  function currentPoSupplierEntry(modal){
+    const supplierField = modal?.querySelector('#add-po-form [name="supplier"]');
+    return getSupplierCatalogEntry((supplierField?.value || '').trim());
+  }
+
+  function populatePoRowCategorySelect(row, entry){
+    const catField = row.querySelector('.po-item-category');
+    if(!catField) return;
+    const categories = supplierCategoriesFor(entry);
+    catField.innerHTML = '<option value="">Select category...</option>' + categories.map(c => `<option value="${htmlEscape(c)}">${htmlEscape(c)}</option>`).join('');
+    catField.value = '';
+    populatePoRowItemSelect(row, entry, '');
+  }
+  function populatePoRowItemSelect(row, entry, category){
+    const itemField = row.querySelector('.po-item-name');
+    const priceField = row.querySelector('.po-item-price');
     if(!itemField) return;
-    const supplierName = (supplierField?.value || '').trim();
-    const entry = getSupplierCatalogEntry(supplierName);
-    const products = (entry?.products || []).filter(product => product && product.name);
-    itemField.innerHTML = '<option value="">Select item...</option>' + products.map(product => {
-      const name = String(product.name || '').trim();
-      const unitPrice = Number(product.unitPrice || product.price || 0);
-      return `<option value="${htmlEscape(name)}" data-unit-price="${unitPrice}">${htmlEscape(name)}</option>`;
+    const items = category ? itemsForCategory(entry, category) : [];
+    itemField.innerHTML = '<option value="">Select item...</option>' + items.map(p => {
+      const name = String(p.name || '').trim();
+      const price = Number(p.unitPrice || p.price || 0);
+      return `<option value="${htmlEscape(name)}" data-unit-price="${price}">${htmlEscape(name)}</option>`;
     }).join('');
-    if(brandField) brandField.value = entry?.brand || '';
-    if(warehouseField && entry?.warehouseId) warehouseField.value = String(entry.warehouseId);
-    if(selectedItem){
-      itemField.value = selectedItem;
-    } else if(form.__poCurrentItem){
-      itemField.value = form.__poCurrentItem;
-    } else {
-      itemField.value = '';
-    }
+    itemField.disabled = !category;
+    itemField.value = '';
+    if(priceField) priceField.value = '';
+    recomputePoRowAmount(row);
+  }
+
+  function recomputePoRowAmount(row){
+    const qty = Number(row.querySelector('.po-item-qty')?.value || 0);
+    const price = Number(row.querySelector('.po-item-price')?.value || 0);
+    const amountField = row.querySelector('.po-item-amount');
+    if(amountField) amountField.value = money(qty * price);
+  }
+
+  function recomputePoTotals(modal){
+    const form = modal?.querySelector('#add-po-form');
+    if(!form) return;
+    let totalAmount = 0;
+    form.querySelectorAll('.po-item-row').forEach(row => {
+      const qty = Number(row.querySelector('.po-item-qty')?.value || 0);
+      const price = Number(row.querySelector('.po-item-price')?.value || 0);
+      totalAmount += qty * price;
+    });
+    const amountField = form.querySelector('[name="amount"]');
+    if(amountField) amountField.value = totalAmount.toFixed(2);
+  }
+
+  function bindPoItemRow(modal, row){
+    const catField = row.querySelector('.po-item-category');
+    const itemField = row.querySelector('.po-item-name');
+    const qtyField = row.querySelector('.po-item-qty');
+    catField?.addEventListener('change', () => {
+      populatePoRowItemSelect(row, currentPoSupplierEntry(modal), catField.value);
+      recomputePoTotals(modal);
+    });
+    itemField?.addEventListener('change', () => {
+      const priceField = row.querySelector('.po-item-price');
+      const selected = itemField.selectedOptions?.[0];
+      if(priceField) priceField.value = selected?.dataset?.unitPrice || '';
+      recomputePoRowAmount(row);
+      recomputePoTotals(modal);
+    });
+    qtyField?.addEventListener('input', () => { recomputePoRowAmount(row); recomputePoTotals(modal); });
+    qtyField?.addEventListener('change', () => { recomputePoRowAmount(row); recomputePoTotals(modal); });
+  }
+
+  function addPoItemRow(modal){
+    const container = modal?.querySelector('#po-items-rows');
+    const template = document.getElementById('po-item-row-template');
+    if(!container || !template) return null;
+    const row = template.content.firstElementChild.cloneNode(true);
+    container.appendChild(row);
+    bindPoItemRow(modal, row);
+    populatePoRowCategorySelect(row, currentPoSupplierEntry(modal));
+    updatePoItemRemoveButtons(modal);
+    recomputePoTotals(modal);
+    return row;
+  }
+  function removePoItemRow(btn){
+    const modal = btn.closest('.modal-overlay');
+    const container = modal?.querySelector('#po-items-rows');
+    if(!container || container.children.length <= 1) return; // keep at least one row
+    btn.closest('.po-item-row')?.remove();
+    updatePoItemRemoveButtons(modal);
+    recomputePoTotals(modal);
+  }
+  function updatePoItemRemoveButtons(modal){
+    const rows = [...(modal?.querySelectorAll('.po-item-row') || [])];
+    rows.forEach(r => {
+      const btn = r.querySelector('.po-item-remove');
+      if(btn) btn.style.visibility = rows.length > 1 ? 'visible' : 'hidden';
+    });
+  }
+  // Reset the item rows back to exactly one empty row (called when the PO
+  // modal opens/closes so a previous session's extra rows don't linger).
+  function resetPoItemRows(modal){
+    const container = modal?.querySelector('#po-items-rows');
+    if(!container) return;
+    container.innerHTML = '';
+    addPoItemRow(modal);
+  }
+  // Supplier changed: every row shares the same supplier, so repopulate every
+  // row's category (and clear its item/price, since the old item may not
+  // belong to the new supplier) rather than just the row being edited.
+  function refreshAllPoItemRowsForSupplier(modal){
+    const entry = currentPoSupplierEntry(modal);
+    modal?.querySelectorAll('.po-item-row').forEach(row => populatePoRowCategorySelect(row, entry));
+    recomputePoTotals(modal);
+  }
+  // Reads the item rows back out for submission: {category, name, qty, unitPrice, amount}.
+  function collectPoItemRows(modal){
+    return [...(modal?.querySelectorAll('.po-item-row') || [])].map(row => {
+      const category = row.querySelector('.po-item-category')?.value || '';
+      const name = row.querySelector('.po-item-name')?.value || '';
+      const qty = Number(row.querySelector('.po-item-qty')?.value || 0);
+      const unitPrice = Number(row.querySelector('.po-item-price')?.value || 0);
+      return { category, name, qty, unitPrice, amount: qty * unitPrice };
+    }).filter(r => r.name && r.qty > 0);
   }
 
   function bindPoFormAutofill(modal){
@@ -137,53 +253,9 @@
     if(!form || form.__poAutofillBound) return;
     form.__poAutofillBound = true;
     const supplierField = form.querySelector('[name="supplier"]');
-    const itemField = form.querySelector('[name="item"]');
-    const qtyField = form.querySelector('[name="qty"]');
-    const unitPriceField = form.querySelector('[name="unitPrice"]');
-    const amountField = form.querySelector('[name="amount"]');
-    const brandField = form.querySelector('[name="brand"]');
-    const update = () => applyPoAutofill(form);
-    supplierField?.addEventListener('change', () => {
-      populatePoItemSelect(form);
-      update();
-    });
-    itemField?.addEventListener('change', () => {
-      form.__poCurrentItem = itemField.value;
-      update();
-    });
-    itemField?.addEventListener('input', () => {
-      form.__poCurrentItem = itemField.value;
-      update();
-    });
-    qtyField?.addEventListener('input', update);
-    qtyField?.addEventListener('change', update);
-    unitPriceField?.addEventListener('input', update);
-    unitPriceField?.addEventListener('change', update);
-    brandField?.addEventListener('input', update);
-  }
-
-  function applyPoAutofill(form){
-    if(!form) return;
-    const supplierField = form.querySelector('[name="supplier"]');
-    const itemField = form.querySelector('[name="item"]');
-    const qtyField = form.querySelector('[name="qty"]');
-    const unitPriceField = form.querySelector('[name="unitPrice"]');
-    const amountField = form.querySelector('[name="amount"]');
-    const brandField = form.querySelector('[name="brand"]');
-    const supplierName = (supplierField?.value || '').trim();
-    const entry = getSupplierCatalogEntry(supplierName);
-    if(entry){
-      if(brandField && (!brandField.value || brandField.value === supplierName)) brandField.value = entry.brand || supplierName;
-      const itemValue = (itemField?.value || '').trim().toLowerCase();
-      const selectedOption = itemField?.selectedOptions?.[0];
-      const selectedUnitPrice = Number(selectedOption?.dataset?.unitPrice || 0);
-      const match = (entry.products || []).find(p => String(p.name || '').toLowerCase().includes(itemValue));
-      if(match && unitPriceField && (!unitPriceField.value || Number(unitPriceField.value) === 0)) unitPriceField.value = Number(match.unitPrice || 0);
-      else if(selectedUnitPrice && unitPriceField && (!unitPriceField.value || Number(unitPriceField.value) === 0)) unitPriceField.value = selectedUnitPrice;
-    }
-    const qty = Number(qtyField?.value || 0);
-    const unitPrice = Number(unitPriceField?.value || 0);
-    if(amountField) amountField.value = (qty * unitPrice).toFixed(2);
+    // Selecting a supplier only loads that supplier's categories/items into
+    // every item row — it must never touch a row's unit price on its own.
+    supplierField?.addEventListener('change', () => refreshAllPoItemRowsForSupplier(modal));
   }
 
   function refreshDeliveryPoOptions(){
@@ -209,6 +281,7 @@
           po: poNumber,
           supplier: supplierNameFromCell(row.children[1]),
           item: row.dataset.item || textFrom(row.children[2]) || '',
+          items: getPoItems(row),
           qty: row.dataset.qty || '',
           unitPrice: row.dataset.unitPrice || '',
           status: String(row.dataset.status || textFrom(row.children[6]) || '').toLowerCase().trim(),
@@ -235,6 +308,7 @@
             po: item.po_number,
             supplier: item.supplier_name || '—',
             item: item.item || '',
+            items: Array.isArray(item.items) ? item.items : [],
             qty: item.qty || '',
             unitPrice: item.unit_price || '',
             status: String(item.status || 'approved').toLowerCase().trim(),
@@ -261,6 +335,7 @@
         po: trimmed,
         supplier: resolveSupplierByPO(trimmed) || '',
         item: domRow.dataset.item || textFrom(domRow.children[2]) || '',
+        items: getPoItems(domRow),
         qty: domRow.dataset.qty || '',
         unitPrice: domRow.dataset.unitPrice || '',
         status: String(domRow.dataset.status || textFrom(domRow.children[6]) || '').toLowerCase().trim(),
@@ -270,27 +345,47 @@
     return window.APPROVED_PO_CACHE?.[trimmed] || null;
   }
 
+  /* ---------- Delivery: items-purchased chips (replaces the manual Item field) ---------- */
+  function renderDeliveryItemChips(poInfo){
+    const wrap = document.getElementById('delivery-items-chips');
+    const hidden = document.getElementById('delivery-items-value');
+    if(!wrap) return;
+    const items = Array.isArray(poInfo?.items) && poInfo.items.length
+      ? poInfo.items
+      : (poInfo?.item ? [{ name: poInfo.item, qty: poInfo.qty, unitPrice: poInfo.unitPrice }] : []);
+    if(!items.length){
+      wrap.innerHTML = '<div class="product-list-empty">No items found for this purchase order.</div>';
+      if(hidden) hidden.value = '';
+      return;
+    }
+    wrap.innerHTML = items.map(it => `<span class="product-chip"><span>${htmlEscape(it.name || 'Item')}</span><span class="meta">Qty ${Number(it.qty || 0)}${it.unitPrice ? ' · ₱' + Number(it.unitPrice).toFixed(2) : ''}</span></span>`).join('');
+    if(hidden) hidden.value = items.map(it => it.name).filter(Boolean).join(', ');
+  }
+  function resetDeliveryItemChips(){
+    const wrap = document.getElementById('delivery-items-chips');
+    const hidden = document.getElementById('delivery-items-value');
+    if(wrap) wrap.innerHTML = '<div class="product-list-empty">Select a PO to load its items.</div>';
+    if(hidden) hidden.value = '';
+  }
+
   function bindDeliveryPoAutofill(modal){
     const form = modal?.querySelector('#add-delivery-form');
     if(!form || form.__deliveryPoBound) return;
     form.__deliveryPoBound = true;
     const poField = form.querySelector('[name="po"]');
     const supplierField = form.querySelector('[name="supplier"]');
-    const itemField = form.querySelector('[name="items"]');
     const qtyField = form.querySelector('[name="qty"]');
     const unitPriceField = form.querySelector('[name="unit_price"]');
     const amountField = form.querySelector('[name="amount"]');
     const update = () => {
       const poNumber = (poField?.value || '').trim();
-      if(!poNumber) return;
+      if(!poNumber){ resetDeliveryItemChips(); return; }
       const poInfo = getPoInfo(poNumber);
       if(!poInfo) return;
       if(supplierField){
         supplierField.value = poInfo.supplier || '';
       }
-      if(itemField && !itemField.value){
-        itemField.value = poInfo.item || '';
-      }
+      renderDeliveryItemChips(poInfo);
       if(qtyField && (!qtyField.value || Number(qtyField.value) === 0)){
         qtyField.value = poInfo.qty || '';
       }
@@ -334,24 +429,37 @@
     const yr = new Date().getFullYear();
     if(kind==='po'){
       bindPoFormAutofill(modal);
-      const poNum = ID_COUNTS.po + 1;
+      resetPoItemRows(modal);
+      // Prefer the server-provided real next sequence (window.nextPoSeq) so the
+      // number doesn't collide with existing POs; fall back to the local counter.
+      const poNum = Number(window.nextPoSeq) > 0 ? Number(window.nextPoSeq) : (ID_COUNTS.po + 1);
       setModalFieldValue(modal, 'po', `PO-${yr}-${pad(poNum,4)}`);
       const exp = new Date(); exp.setDate(exp.getDate()+7);
       setModalFieldValue(modal, 'expected', exp.toISOString().slice(0,10));
       refreshPoSupplierOptions(modal);
-      
-      // Auto-fill from requisition data — only the Qty (and the reference
-      // number) should carry over. Item/Brand/Supplier are chosen by the
-      // person creating the PO, not copied from the request.
+
+      // Auto-fill from requisition data — Qty, the reference number, and the
+      // requested Priority carry over. Item/Category/Supplier are chosen by
+      // the person creating the PO, not copied from the request.
+      // Always set reqRef/priority explicitly (both directions) so a PO created
+      // straight from this page doesn't inherit a leftover requisition
+      // reference/priority from a previous conversion — form.reset() can't
+      // clear these because their defaultValue gets mutated once assigned.
       if(reqData){
-        if(reqData.reqNum) setModalFieldValue(modal, 'reqRef', reqData.reqNum);
-        if(reqData.qty) setModalFieldValue(modal, 'qty', reqData.qty);
+        setModalFieldValue(modal, 'reqRef', reqData.reqNum || '');
+        if(reqData.qty){
+          const firstQty = modal.querySelector('#po-items-rows .po-item-row .po-item-qty');
+          if(firstQty) firstQty.value = reqData.qty;
+        }
+        setModalFieldValue(modal, 'priority', normalizePriorityLabel(reqData.priority));
+      } else {
+        setModalFieldValue(modal, 'reqRef', '');
+        setModalFieldValue(modal, 'priority', 'Normal');
       }
       setTimeout(() => {
-        const poForm = modal.querySelector('#add-po-form');
-        // wait for supplier options/catalog to be ready before populating items
+        // wait for supplier options/catalog to be ready before recomputing totals
         refreshPoSupplierOptions(modal).then(() => {
-          applyPoAutofill(poForm);
+          recomputePoTotals(modal);
         });
       }, 60);
     } else if(kind==='req'){
@@ -359,9 +467,10 @@
       setModalFieldValue(modal, 'rq', `REQ-${yr}-${pad(reqNum,4)}`);
       setModalFieldValue(modal, 'dateReq', todayISO());
     } else if(kind==='delivery'){
-      const shpNum = ID_COUNTS.dr + 1;
+      const shpNum = Number(window.nextShipmentSeq) > 0 ? Number(window.nextShipmentSeq) : (ID_COUNTS.dr + 1);
       setModalFieldValue(modal, 'dr', `SHP-${yr}-${pad(shpNum,4)}`);
       setModalFieldValue(modal, 'delDate', todayISO());
+      resetDeliveryItemChips();
       refreshDeliveryPoOptions();
       bindDeliveryPoAutofill(modal);
     } else if(kind==='invoice'){
@@ -392,16 +501,29 @@
       if(kind === 'po'){
         const poTitle = modal.querySelector('h3');
         if(poTitle) poTitle.textContent = 'Create New Purchase Order';
+        resetPoItemRows(modal);
       }
     }
     if(kind==='supplier'){
       resetSupplierProductDraft();
     }
+    if(kind==='delivery'){
+      resetDeliveryItemChips();
+    }
   }
 
-  // Convert Requisition to PO
-  function convertReqToPO(reqNum, item, qty){
-    const reqData = { reqNum, item, qty };
+  // Normalize any priority string (e.g. "URGENT", "high") to the Title-case
+  // label stored on the PO (Urgent / High / Normal / Low).
+  function normalizePriorityLabel(value){
+    const key = String(value || '').trim().toLowerCase();
+    const map = { urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' };
+    return map[key] || 'Normal';
+  }
+
+  // Convert Requisition to PO — carry the requisition's priority through so the
+  // new PO keeps the requested priority instead of defaulting to Normal.
+  function convertReqToPO(reqNum, item, qty, priority){
+    const reqData = { reqNum, item, qty, priority };
     openAddModal('po', reqData);
   }
 
@@ -412,7 +534,7 @@
     if(!row) return;
     const record = buildRecord(row);
     if(record.type === 'req'){
-      convertReqToPO(record.ref, record.item, record.qty);
+      convertReqToPO(record.ref, record.item, record.qty, record.priority);
       closeViewModal();
     }
   }
@@ -437,10 +559,14 @@
       if(!supplierProductDraft.length){
         list.innerHTML = '<div class="product-list-empty">No products added yet.</div>';
       } else {
+        // Editable rows: name, category, and price are inline inputs so
+        // existing products can be edited, not just added or removed.
         list.innerHTML = supplierProductDraft.map((item, idx) => `
-          <div class="product-chip">
-            <span>${htmlEscape(item.name || 'Unnamed product')}</span>
-            <span class="meta">${htmlEscape(item.sku || 'SKU pending')} · ₱${Number(item.price || 0).toFixed(2)}</span>
+          <div class="product-chip product-chip-edit">
+            <input type="text" class="product-chip-name" value="${htmlEscape(item.name || '')}" placeholder="Product name" oninput="updateSupplierProduct(${idx}, 'name', this.value)">
+            <input type="text" class="product-chip-category-input" value="${htmlEscape(item.category || '')}" placeholder="Category" oninput="updateSupplierProduct(${idx}, 'category', this.value)">
+            <span class="product-chip-sku">${htmlEscape(item.sku || 'SKU pending')}</span>
+            <span class="product-chip-price">₱<input type="number" min="0" step="0.01" class="product-chip-price-input" value="${Number(item.price || 0)}" placeholder="0.00" oninput="updateSupplierProduct(${idx}, 'price', this.value)"></span>
             <button type="button" class="remove" onclick="removeSupplierProduct(${idx})" title="Remove">×</button>
           </div>
         `).join('');
@@ -452,6 +578,19 @@
   function removeSupplierProduct(index){
     supplierProductDraft.splice(index, 1);
     renderSupplierProductList();
+  }
+
+  function updateSupplierProduct(index, field, value){
+    if(!supplierProductDraft[index]) return;
+    if(field === 'price'){
+      supplierProductDraft[index].price = Number(value || 0);
+    } else {
+      supplierProductDraft[index][field] = value;
+    }
+    // Update only the hidden JSON payload — don't re-render, or the input the
+    // user is typing into would lose focus on every keystroke.
+    const hidden = document.getElementById(supplierProductEditor.hiddenId);
+    if(hidden){ hidden.value = JSON.stringify(supplierProductDraft); }
   }
 
   function openSupplierProductModal(){
@@ -517,10 +656,11 @@
     const form = e.target;
     const d = Object.fromEntries(new FormData(form).entries());
     const name = (d.productName || '').trim();
+    const category = (d.productCategory || '').trim();
     const price = Number(d.productPrice || 0);
     if(!name){ return; }
     const sku = (d.productSku || '').trim() || generateSupplierProductSku(name);
-    supplierProductDraft.push({ name, sku, price });
+    supplierProductDraft.push({ name, category, sku, price });
     supplierProductCounter += 1;
     renderSupplierProductList();
     form.reset();
@@ -550,9 +690,18 @@
   }
   function confirmCancelPO(){
     if(cancelPOData && cancelPOData.row){
-      cancelPOData.row.dataset.status = 'cancelled';
-      cancelPOData.row.classList.add('cancelled-row');
-      cancelPOData.row.cells[6].innerHTML = '<span class="status-pill cancelled">Cancelled</span>';
+      const row = cancelPOData.row;
+      row.dataset.status = 'cancelled';
+      row.classList.add('cancelled-row');
+      row.cells[6].innerHTML = '<span class="status-pill cancelled">Cancelled</span>';
+      // Previously this only updated the DOM — the cancellation was never sent
+      // to the server, so refreshing the page silently reverted the PO (and any
+      // requisition derived from it) back to its old status.
+      if(typeof persistPurchaseOrderStatus === 'function'){
+        persistPurchaseOrderStatus(row, 'Cancelled').then(() => {
+          if(typeof syncRelatedRequisitionStatusForPO === 'function') syncRelatedRequisitionStatusForPO(row, 'Cancelled');
+        }).catch(() => {});
+      }
       showToast(`PO ${cancelPOData.poNum} cancelled`, 'no');
     }
     closeCancelModal();
@@ -569,10 +718,18 @@
 
   function submitAddPO(e){
     e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.target).entries());
-    const qtyNum = Number(d.qty || 0);
-    const unitPriceNum = Number(d.unitPrice || 0);
-    const amountNum = Number(d.amount || 0) || (qtyNum * unitPriceNum);
+    const form = e.target;
+    const modal = form.closest('.modal-overlay');
+    const d = Object.fromEntries(new FormData(form).entries());
+    const items = collectPoItemRows(modal);
+    if(!items.length){
+      showToast('Add at least one item (category, item, and quantity) before submitting.', 'no');
+      return;
+    }
+    const qtyNum = items.reduce((sum, it) => sum + it.qty, 0);
+    const amountNum = items.reduce((sum, it) => sum + it.amount, 0);
+    const primaryCategory = items[0].category || '';
+    const itemSummary = items.map(it => it.name).join(', ');
     const poDate = todayISO();
     const priorityLabel = d.priority || 'Normal';
 
@@ -582,14 +739,10 @@
       body: new URLSearchParams({
         po: d.po,
         supplier: d.supplier,
-        brand: d.brand || '',
-        item: d.item || '',
-        qty: String(qtyNum),
-        unitPrice: String(unitPriceNum),
-        amount: String(amountNum),
+        category: primaryCategory,
+        items: JSON.stringify(items),
         priority: priorityLabel,
         expected: d.expected || '',
-        warehouse_id: d.warehouse_id || '',
         createdBy: d.createdBy || '',
         remarks: d.remarks || '',
         reqRef: d.reqRef || ''
@@ -606,22 +759,23 @@
         tr.dataset.status = 'pending';
         tr.dataset.date = poDate;
         tr.dataset.amount = amountNum;
-        tr.dataset.item = d.item || '';
+        tr.dataset.item = itemSummary;
+        tr.dataset.items = JSON.stringify(items.map(it => ({ name: it.name, qty: it.qty, unitPrice: it.unitPrice })));
         tr.dataset.expected = d.expected || '';
         tr.dataset.remarks = d.remarks || '';
         tr.dataset.requestedBy = d.createdBy || 'Procurement Team';
         tr.dataset.supplier = d.supplier || '';
-        tr.dataset.brand = d.brand || '';
+        tr.dataset.brand = primaryCategory;
         tr.dataset.qty = qtyNum;
-        tr.dataset.unitPrice = unitPriceNum;
+        tr.dataset.unitPrice = items[0].unitPrice || 0;
         tr.dataset.reqRef = d.reqRef || '';
         tr.dataset.priority = priorityLabel;
         tr.dataset.delivery = 'Pending';
         tr.innerHTML = `
           <td><a class="po-link">${d.po}</a></td>
           <td>${supplierPill(d.supplier || 'Unknown Supplier')}</td>
-          <td>${htmlEscape(d.item || '—')}</td>
-          <td>${money(unitPriceNum)}</td>
+          <td style="max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="${htmlEscape(itemSummary)}">${htmlEscape(itemSummary || '—')}</td>
+          <td>${money(items[0].unitPrice || 0)}</td>
           <td><b>${money(amountNum)}</b></td>
           <td>${priorityBadge(priorityLabel)}</td>
           <td>${statusPill('Pending')}</td>
@@ -659,6 +813,7 @@
       updateStatusCounts();
       showToast(`Purchase Order ${d.po} created`, 'ok');
       closeAddModal('po');
+      if(typeof pollLiveStats === 'function') pollLiveStats();
     }).catch(() => {
       showToast('Unable to save purchase order right now.', 'no');
     });
@@ -774,6 +929,7 @@
       initRowActionButtons();
       showToast(`Requisition ${d.rq} submitted for approval`, 'ok');
       closeAddModal('req');
+      if(typeof pollLiveStats === 'function') pollLiveStats();
     }).catch(() => {
       showToast('Unable to save requisition right now.', 'no');
     });
@@ -785,6 +941,10 @@
     const poInfo = getPoInfo(d.po || '');
     if(!poInfo || poInfo.status !== 'approved'){
       showToast('Only approved purchase orders can be logged in deliveries.', 'info');
+      return;
+    }
+    if(!(d.items || '').trim()){
+      showToast('Select a purchase order so its items can be loaded before logging the delivery.', 'no');
       return;
     }
     const expectedDate = poInfo.expected || '';
@@ -803,7 +963,8 @@
         qty: d.qty || '1',
         delDate: d.delDate || '',
         status: statusLabel,
-        remarks: d.remarks || ''
+        remarks: d.remarks || '',
+        warehouse_id: d.warehouse_id || ''
       }).toString()
     }).then(res => res.json().then(json => ({ ok: res.ok, json }))).then(({ ok, json }) => {
       if(!ok){
@@ -811,6 +972,9 @@
         return;
       }
       const shipmentNumber = json?.shipment_number || json?.data?.shipment_number || d.dr;
+      // Display only the trailing sequence (e.g. 0001); keep the full number in
+      // data-ship and the database.
+      const shipmentDisplay = (String(shipmentNumber).match(/(\d+)$/) || [null, shipmentNumber])[1];
       const table = document.querySelector('#deliveries-table tbody');
       const poRow = findPoRowByNumber(d.po || '');
       if(table){
@@ -824,8 +988,9 @@
         tr.dataset.note = d.remarks || `${d.items} · Qty ${d.qty}`;
         tr.dataset.carrier = 'Assigned carrier';
         tr.dataset.expected = expectedDate;
+        tr.dataset.warehouse = (document.querySelector('#delivery-warehouse-select')?.selectedOptions?.[0]?.textContent || '').trim();
         tr.innerHTML = `
-          <td><a class="po-link">${htmlEscape(shipmentNumber)}</a></td>
+          <td><a class="po-link">${htmlEscape(shipmentDisplay)}</a></td>
           <td><a class="po-link">${d.po}</a></td>
           <td>${supplierPill(d.supplier)}</td>
           <td>${htmlEscape(d.items || '—')}</td>
@@ -854,6 +1019,7 @@
       updateStatusCounts();
       showToast(`Delivery ${shipmentNumber} logged`, 'ok');
       closeAddModal('delivery');
+      if(typeof pollLiveStats === 'function') pollLiveStats();
     }).catch(() => {
       showToast('Unable to save delivery right now.', 'no');
     });

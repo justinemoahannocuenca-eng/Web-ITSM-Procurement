@@ -20,10 +20,6 @@
           <div class="status-label">Pending</div>
           <div class="status-count">{{ $statusCounts->get('pending', 0) }}</div>
         </div>
-        <div class="status-chart-item scheduled" data-status="scheduled" style="background:linear-gradient(135deg,#f0eaff,#dcd0fb);border-color:#7a5af0;" onclick="filterByStatus('deliveries-table', 'scheduled', this)">
-          <div class="status-label">Scheduled</div>
-          <div class="status-count">{{ $statusCounts->get('scheduled', 0) }}</div>
-        </div>
         <div class="status-chart-item intransit" data-status="intransit" style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-color:#2196f3;" onclick="filterByStatus('deliveries-table', 'intransit', this)">
           <div class="status-label">intransit</div>
           <div class="status-count">{{ $statusCounts->get('intransit', 0) }}</div>
@@ -42,10 +38,6 @@
         <div class="status-chart-item completed" data-status="completed" style="background:linear-gradient(135deg,#e0f2f1,#b2dfdb);border-color:#009688;" onclick="filterByStatus('deliveries-table', 'completed', this)">
           <div class="status-label">Completed</div>
           <div class="status-count">{{ $statusCounts->get('completed', 0) }}</div>
-        </div>
-        <div class="status-chart-item cancelled" data-status="cancelled" style="background:linear-gradient(135deg,#f1f3f6,#e2e6ee);border-color:#7c88a3;" onclick="filterByStatus('deliveries-table', 'cancelled', this)">
-          <div class="status-label">Cancelled</div>
-          <div class="status-count">{{ $statusCounts->get('cancelled', 0) }}</div>
         </div>
       </div>
       
@@ -131,8 +123,10 @@
                       $badgeColor = $colors[$h % count($colors)];
                     }
                   @endphp
-                  <tr data-id="{{ $d->id }}" data-po="{{ $d->po_number ?? '' }}" data-sup="{{ $d->supplier_name ?? '' }}" data-stage="{{ $d->stage ?? '' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $d->status ?? 'intransit')) }}" data-date="{{ $d->delivery_date ?? '' }}">
-                    <td><a class="po-link">{{ $d->shipment_number }}</a></td>
+                  <tr data-id="{{ $d->id }}" data-ship="{{ $d->shipment_number }}" data-po="{{ $d->po_number ?? '' }}" data-sup="{{ $d->supplier_name ?? '' }}" data-stage="{{ $d->stage ?? '' }}" data-status="{{ strtolower(str_replace([' ', '_'], '-', $d->status ?? 'intransit')) }}" data-date="{{ $d->delivery_date ?? '' }}" data-warehouse="{{ $d->deliver_to_warehouse ?? '' }}">
+                    {{-- Display only the trailing sequence (e.g. 0001); the full
+                         shipment_number stays in data-ship and the database. --}}
+                    <td><a class="po-link">{{ preg_match('/(\d+)$/', (string) $d->shipment_number, $m) ? $m[1] : $d->shipment_number }}</a></td>
                     <td><a class="po-link">{{ $d->po_number ?? '—' }}</a></td>
                     <td><div class="supplier-pill-cell"><span class="supplier-pill"><span class="supplier-badge" style="background: {{ $badgeColor }}">{{ $initials }}</span>{{ $d->supplier_name ?? '—' }}</span></div></td>
                     <td>{{ $d->items ?? '—' }}</td>

@@ -22,6 +22,33 @@ class PurchaseOrderController extends Controller
     }
 
     /**
+     * Load each PO's item rows (added when multi-item PO support was
+     * introduced), grouped by purchase_order_id, in the JSON shape the
+     * frontend chips/cascading selects expect: {name, qty, unitPrice}.
+     */
+    private function itemsGroupedByPurchaseOrder($purchaseOrderIds)
+    {
+        if (empty($purchaseOrderIds)) {
+            return collect();
+        }
+
+        return DB::connection('procurement')->table('purchase_order_items')
+            ->whereIn('purchase_order_id', $purchaseOrderIds)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('purchase_order_id')
+            ->map(function ($rows) {
+                return $rows->map(function ($row) {
+                    return [
+                        'name' => $row->name,
+                        'qty' => (int) $row->qty,
+                        'unitPrice' => (float) $row->unit_price,
+                    ];
+                })->values();
+            });
+    }
+
+    /**
      * Detect a unique-constraint violation (e.g. a duplicate po_number),
      * regardless of which database driver raised it.
      */
@@ -78,6 +105,10 @@ class PurchaseOrderController extends Controller
             ->limit(8)
             ->get();
 
+        // Item breakdown per PO (name/qty/price), used for the View modal's
+        // item chips — same "products as chips" pattern used on Suppliers.
+        $poItemsByOrder = $this->itemsGroupedByPurchaseOrder($purchaseOrders->pluck('id')->all());
+
         $suppliers = $this->table('suppliers')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -95,7 +126,7 @@ class PurchaseOrderController extends Controller
                 return [strtolower(str_replace([' ', '_'], '-', $status ?? 'pending')) => $total];
             });
 
-        return view('procurement::pages.purchase-orders', compact('purchaseOrders', 'suppliers', 'warehouses', 'statusCounts'));
+        return view('procurement::pages.purchase-orders', compact('purchaseOrders', 'poItemsByOrder', 'suppliers', 'warehouses', 'statusCounts'));
     }
 
     public function approved(Request $request)
@@ -107,39 +138,64 @@ class PurchaseOrderController extends Controller
             ->orderBy('purchase_orders.order_date', 'desc')
             ->get();
 
+        // Attach each PO's item breakdown so the Log Delivery modal can show
+        // the purchased items as chips instead of a free-text Item field.
+        $itemsByOrder = $this->itemsGroupedByPurchaseOrder($approvedPurchaseOrders->pluck('id')->all());
+        $approvedPurchaseOrders->each(function ($po) use ($itemsByOrder) {
+            $po->items = $itemsByOrder->get($po->id, collect())->values();
+        });
+
         return response()->json($approvedPurchaseOrders);
     }
 
     /**
      * Handle the "+ New PO" modal submit (submitAddPO in app-forms.js).
+     *
+     * A PO can now carry multiple item rows (supplier -> category -> item
+     * cascading select per row in the modal). `items` is a JSON-encoded array
+     * of {category, name, qty, unitPrice, amount}; the legacy single-item
+     * columns (item, brand, unit_price, qty) are kept in sync from that array
+     * so every place that still reads them (tables, filters, dashboard "Spend
+     * by Brand") keeps working: `item` becomes a joined item-name summary,
+     * `brand` holds the first row's category, `qty` is the summed quantity,
+     * and `amount` is the summed total.
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
             'po' => 'required|string|max:50',
             'supplier' => 'required|string|max:150',
-            'brand' => 'nullable|string|max:100',
-            'item' => 'nullable|string|max:150',
-            'qty' => 'nullable|integer|min:1',
-            'unitPrice' => 'nullable|numeric|min:0',
-            'amount' => 'nullable|numeric|min:0',
+            'category' => 'nullable|string|max:100',
+            'items' => 'required|string',
             'priority' => 'nullable|string|max:20',
             'expected' => 'nullable|date',
             'createdBy' => 'nullable|string|max:150',
             'remarks' => 'nullable|string',
             'reqRef' => 'nullable|string|max:50',
-            'warehouse_id' => 'required|integer',
+            'warehouse_id' => 'nullable|integer',
         ]);
 
-        $warehouse = Warehouse::query()
-            ->whereKey((int) $validated['warehouse_id'])
-            ->where('status', 'active')
-            ->first();
-
-        if (! $warehouse) {
+        $items = $this->sanitizeItemRows($validated['items']);
+        if (empty($items)) {
             throw ValidationException::withMessages([
-                'warehouse_id' => 'Select an active warehouse belonging to your client.',
+                'items' => 'Add at least one item with a category, item, and quantity.',
             ]);
+        }
+
+        $totalQty = (int) array_sum(array_column($items, 'qty'));
+        $totalAmount = (float) array_sum(array_column($items, 'amount'));
+        $primaryCategory = $validated['category'] ?? ($items[0]['category'] ?? '');
+        $itemSummary = implode(', ', array_column($items, 'name'));
+
+        // Warehouse is optional (the module matches nexora, which chooses the
+        // warehouse on the delivery, not the PO). Only look one up when a
+        // warehouse_id was actually provided.
+        $warehouse = null;
+        if (! empty($validated['warehouse_id'])) {
+            $warehouse = Warehouse::query()
+                ->whereKey((int) $validated['warehouse_id'])
+                ->where('status', 'active')
+                ->first();
         }
 
         $supplier = $this->table('suppliers')->where('name', $validated['supplier'])->first();
@@ -153,7 +209,7 @@ class PurchaseOrderController extends Controller
                 'email' => 'auto@example.com',
                 'phone' => 'N/A',
                 'address' => 'Auto-imported',
-                'brand' => $validated['brand'] ?? null,
+                'brand' => $primaryCategory ?: null,
                 'status' => 'active',
                 'product_items' => '[]',
                 'created_at' => now(),
@@ -165,20 +221,20 @@ class PurchaseOrderController extends Controller
             'client_id' => (int) session('employee_client_id'),
             'po_number' => $validated['po'],
             'supplier_id' => $supplierId,
-            'qty' => (int) ($validated['qty'] ?? 1),
-            'amount' => (float) ($validated['amount'] ?? 0),
+            'qty' => $totalQty,
+            'amount' => $totalAmount,
             'status' => 'pending',
             'priority' => strtolower($validated['priority'] ?? 'normal'),
             'order_date' => now()->toDateString(),
             'expected_delivery_date' => $validated['expected'] ?? null,
             'created_by' => $validated['createdBy'] ?? null,
             'remarks' => $validated['remarks'] ?? null,
-            'item' => $validated['item'] ?? null,
-            'brand' => $validated['brand'] ?? null,
-            'unit_price' => (float) ($validated['unitPrice'] ?? 0),
+            'item' => $itemSummary,
+            'brand' => $primaryCategory ?: null,
+            'unit_price' => (float) ($items[0]['unit_price'] ?? 0),
             'requisition_reference' => $validated['reqRef'] ?? null,
-            'warehouse_id' => $warehouse->id,
-            'delivery_address' => $warehouse->address,
+            'warehouse_id' => $warehouse?->id,
+            'delivery_address' => $warehouse?->address,
             'created_at' => now(),
             'updated_at' => now(),
         ];
@@ -186,21 +242,69 @@ class PurchaseOrderController extends Controller
         $poId = $this->insertPurchaseOrder($insert);
         $savedPoNumber = $this->table('purchase_orders')->where('id', $poId)->value('po_number');
 
-        DB::connection('procurement')->table('purchase_order_items')->insert([
-            'client_id' => (int) session('employee_client_id'),
-            'purchase_order_id' => $poId,
-            'supplier_product_id' => null,
-            'name' => $validated['item'] ?? 'Item',
-            'qty' => (int) ($validated['qty'] ?? 1),
-            'unit_price' => (float) ($validated['unitPrice'] ?? 0),
-            'amount' => (float) ($validated['amount'] ?? 0),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        foreach ($items as $item) {
+            // Best-effort link back to the supplier's catalog row (for
+            // reporting); the PO item row is still fully self-contained
+            // (name/qty/price) if no match is found.
+            $supplierProductId = DB::connection('procurement')->table('supplier_products')
+                ->where('supplier_id', $supplierId)
+                ->where('name', $item['name'])
+                ->value('id');
+
+            DB::connection('procurement')->table('purchase_order_items')->insert([
+                'client_id' => (int) session('employee_client_id'),
+                'purchase_order_id' => $poId,
+                'supplier_product_id' => $supplierProductId,
+                'name' => $item['name'],
+                'qty' => $item['qty'],
+                'unit_price' => $item['unit_price'],
+                'amount' => $item['amount'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         $validated['po'] = $savedPoNumber;
+        $validated['item'] = $itemSummary;
+        $validated['qty'] = $totalQty;
+        $validated['amount'] = $totalAmount;
+        $validated['category'] = $primaryCategory;
+        $validated['items'] = $items;
 
         return response()->json(['status' => 'ok', 'data' => $validated, 'id' => $poId, 'po_number' => $savedPoNumber]);
+    }
+
+    /**
+     * Decode + validate the item-rows JSON from the PO modal: drops any row
+     * missing a name or a positive quantity, and recomputes each row's amount
+     * server-side (never trusts the client's math).
+     */
+    private function sanitizeItemRows(string $itemsJson): array
+    {
+        $decoded = json_decode($itemsJson, true);
+        if (! is_array($decoded)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($decoded as $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            $qty = (int) ($row['qty'] ?? 0);
+            if ($name === '' || $qty <= 0) {
+                continue;
+            }
+
+            $unitPrice = (float) ($row['unitPrice'] ?? 0);
+            $rows[] = [
+                'category' => trim((string) ($row['category'] ?? '')),
+                'name' => $name,
+                'qty' => $qty,
+                'unit_price' => $unitPrice,
+                'amount' => round($qty * $unitPrice, 2),
+            ];
+        }
+
+        return $rows;
     }
 
     public function update(Request $request, $purchaseOrder)

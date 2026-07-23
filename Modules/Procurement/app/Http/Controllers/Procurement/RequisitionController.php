@@ -11,7 +11,7 @@ class RequisitionController extends Controller
 {
     private function getRequisitionConnection()
     {
-        foreach (['orderfullfillment', 'manufacturing'] as $connectionName) {
+        foreach (['order_fulfillment', 'manufacturing'] as $connectionName) {
             try {
                 $connection = DB::connection($connectionName);
                 if ($connection->getSchemaBuilder()->hasTable('requisitions')) {
@@ -29,7 +29,7 @@ class RequisitionController extends Controller
     {
         $connections = [];
 
-        foreach (['orderfullfillment', 'manufacturing'] as $connectionName) {
+        foreach (['order_fulfillment', 'manufacturing'] as $connectionName) {
             try {
                 $connection = DB::connection($connectionName);
                 if ($connection->getSchemaBuilder()->hasTable('requisitions')) {

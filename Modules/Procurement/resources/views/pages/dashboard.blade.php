@@ -31,23 +31,28 @@
         <div class="stat-card">
           <div class="stat-label">DELIVERIES</div>
           <div class="stat-value" id="dash-stat-inv">{{ $deliveryCount }}</div>
-          <div class="stat-sub">{{ $pendingDeliveries > 0 ? $pendingDeliveries . ' pending' : 'No deliveries yet' }}</div>
+          <div class="stat-sub">{{ $pendingDeliveries > 0 ? $pendingDeliveries . ' in progress' : 'No deliveries yet' }}</div>
         </div>
       </div>
       
       <div class="dash-grid-3">
         <div class="panel">
-          <h2>Spend by Brand</h2>
-          <div class="panel-sub">{{ count($spendByBrand) > 0 ? $dashboardTotalSpend . ' total' : 'No spend data' }}</div>
-          @if(count($spendByBrand) > 0)
-          <div class="chart-bar-list" id="chart-spend-brand">
-            @foreach($spendByBrand as $item)
-            <div class="chart-bar-item">
-              <div class="chart-bar-label">{{ $item->brand }}</div>
-              <div class="chart-bar-track">
-                <div class="chart-bar-fill" style="width: {{ ($item->total / $spendByBrand->max('total')) * 100 }}%"></div>
+          <h2>Spend by Category</h2>
+          <div class="panel-sub">
+            {{ count($spendByCategory) > 0 ? $dashboardTotalSpend . ' total' : 'No spend data' }}
+            @if(count($spendByCategoryAll ?? []) > 5)
+              <a href="#" class="panel-sub-action" onclick="event.preventDefault(); openSpendByCategoryModal();">View all →</a>
+            @endif
+          </div>
+          @if(count($spendByCategory) > 0)
+          <div class="vbar-chart" id="chart-spend-category">
+            @foreach($spendByCategory as $item)
+            <div class="vbar-col" title="{{ $item->category }} · {{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}">
+              <div class="vbar-value">{{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}</div>
+              <div class="vbar-track">
+                <div class="vbar-fill" style="height: {{ $spendByCategory->max('total') > 0 ? ($item->total / $spendByCategory->max('total')) * 100 : 0 }}%"></div>
               </div>
-              <div class="chart-bar-value">{{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}</div>
+              <div class="vbar-label">{{ $item->category }}</div>
             </div>
             @endforeach
           </div>
@@ -60,21 +65,22 @@
 
         <div class="panel">
           <h2>PO Status Split</h2>
-          <div class="panel-sub">{{ $poCount }} total orders</div>
+          <div class="panel-sub">{{ $poCount }} total purchase orders</div>
           @if(count($poStatusBreakdown) > 0)
           <div class="donut-chart-container">
-            <canvas id="dash-donut" width="160" height="160"></canvas>
-            <div class="donut-center">
+            <canvas id="dash-donut" width="200" height="200"></canvas>
+            <div class="donut-center" id="dash-donut-center">
               <div class="donut-center-val">{{ $poCount }}</div>
-              <div class="donut-center-label">Total POs</div>
+              <div class="donut-center-label">total purchase orders</div>
             </div>
+            <div class="donut-tooltip" id="dash-donut-tooltip"></div>
           </div>
           <div class="donut-legend" id="dash-donut-legend">
             @foreach($poStatusBreakdown as $status => $count)
-            <div class="donut-legend-item">
+            <div class="donut-legend-item" data-status="{{ $status }}" data-count="{{ $count }}" data-percent="{{ $poCount > 0 ? round(($count / $poCount) * 100) : 0 }}">
               <span class="donut-legend-dot status-{{ $status }}"></span>
-              <span class="donut-legend-label">{{ ucfirst($status) }}</span>
-              <span class="donut-legend-value">{{ $count }}</span>
+              <span class="donut-legend-label" title="{{ ucfirst($status) }}">{{ ucfirst($status) }}</span>
+              <span class="donut-legend-value">{{ $poCount > 0 ? round(($count / $poCount) * 100) : 0 }}%</span>
             </div>
             @endforeach
           </div>
@@ -96,36 +102,13 @@
               <div class="ts-body">
                 <div class="ts-name">{{ $supplier->name }}</div>
               </div>
-              <div class="ts-val">{{ $supplier->formatted_total_spend ?? ('PHP ' . number_format((float) ($supplier->total_spend ?? 0), 2)) }}</div>
+              <div class="ts-val">{{ $supplier->formatted_total_spend }}</div>
             </div>
             @endforeach
           </div>
           @else
           <div style="padding:32px 12px; text-align:center; color:var(--text-muted);">
             No top suppliers to display.
-          </div>
-          @endif
-        </div>
-
-        <div class="panel">
-          <h2>Low Stock Alerts</h2>
-          <div class="panel-sub">From Inventory · checked hourly</div>
-          @if(count($lowStockAlerts ?? []) > 0)
-          <div class="top-supplier-list" id="dash-low-stock">
-            @foreach($lowStockAlerts as $alert)
-            <div class="top-supplier-row">
-              <span class="ts-rank" style="background:#ffebee;color:#f44336;">!</span>
-              <div class="ts-body">
-                <div class="ts-name">{{ $alert->item_name ?? 'Unknown item' }}</div>
-                <div style="font-size:11px;color:var(--text-muted);">{{ $alert->sku ?? '—' }}</div>
-              </div>
-              <div class="ts-val" style="color:#f44336;">{{ $alert->stock }} left</div>
-            </div>
-            @endforeach
-          </div>
-          @else
-          <div style="padding:32px 12px; text-align:center; color:var(--text-muted);">
-            No low stock alerts right now.
           </div>
           @endif
         </div>
@@ -156,7 +139,7 @@
               <tr>
                 <td><strong>{{ $po->po_number }}</strong></td>
                 <td>{{ $suppliersMap[$po->supplier_id] ?? 'N/A' }}</td>
-                <td>{{ number_format($po->amount, 2) }} PHP</td>
+                <td>₱{{ number_format($po->amount, 2) }}</td>
                 <td><span class="priority-pill {{ $po->priority }}">{{ ucfirst($po->priority) }}</span></td>
                 <td><span class="status-pill {{ $po->status }}">{{ ucfirst($po->status) }}</span></td>
                 <td>{{ \Carbon\Carbon::parse($po->order_date)->format('M d, Y') }}</td>
@@ -174,13 +157,13 @@
       </div>
         <div class="panel dash-del-panel">
           <h2><span class="live-pulse"></span>Delivery Status</h2>
-          <div class="panel-sub">{{ $deliveryCount }} total / {{ $pendingDeliveries }} pending</div>
+          <div class="panel-sub">{{ $deliveryCount }} total / {{ $pendingDeliveries }} in-transit</div>
           <div class="dash-del-list" id="dash-del-list">
             @if(count($recentDeliveries) > 0)
               @foreach($recentDeliveries as $delivery)
               <div class="dash-del-item">
                 <div class="dash-del-header">
-                  <strong>{{ $delivery->shipment_number }}{{ isset($delivery->po_number) && $delivery->po_number ? ' · ' . $delivery->po_number : '' }}</strong>
+                  <strong>{{ preg_match('/(\d+)$/', (string) $delivery->shipment_number, $m) ? $m[1] : $delivery->shipment_number }}{{ isset($delivery->po_number) && $delivery->po_number ? ' · ' . $delivery->po_number : '' }}</strong>
                   <span class="status-pill {{ $delivery->status }}">{{ ucfirst($delivery->status) }}</span>
                 </div>
                 <div class="dash-del-meta">
@@ -198,13 +181,32 @@
       </div>
     </section>
 
+    <div class="modal-overlay" id="spend-by-category-modal" onclick="if(event.target===this) closeSpendByCategoryModal()">
+      <div class="modal-box form-modal">
+        <div class="modal-head">
+          <div>
+            <h3>Spend by Category</h3>
+            <p style="font-size:12px;color:var(--muted);margin-top:3px;">All categories, ranked by total purchase order spend.</p>
+          </div>
+          <button class="modal-close" onclick="closeSpendByCategoryModal()">✕</button>
+        </div>
+        <div style="padding:16px 24px 4px;">
+          <input type="text" id="spend-by-category-search" placeholder="Search category..." oninput="filterSpendByCategoryModal(this.value)"
+                 style="width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; outline:none;">
+        </div>
+        <div class="chart-bar-list chart-bar-list-h" id="spend-by-category-modal-list" style="padding:12px 24px 24px; max-height:56vh; overflow-y:auto;"></div>
+      </div>
+    </div>
+
     @php
     $poStatusJson = json_encode($poStatusBreakdown);
+    $spendByCategoryAllJson = json_encode(($spendByCategoryAll ?? collect())->map(fn($i) => ['category' => $i->category, 'total' => (float) $i->total, 'formatted' => $i->formatted_total])->values());
     @endphp
-    
+
     <script>
       window.dashboardData = {
-        poStatus: {!! $poStatusJson !!}
+        poStatus: {!! $poStatusJson !!},
+        spendByCategoryAll: {!! $spendByCategoryAllJson !!}
       };
     </script>
 @endsection

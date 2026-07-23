@@ -41,6 +41,6 @@
 @yield('scripts')
 
 {{-- Final init calls (row buttons, tab counts, donut, dashboard animation) --}}
-<script src="{{ asset('Procurement_JS/app-init.js') }}"></script>
+<script src="{{ asset('js/Procurement_JS/app-init.js') }}"></script>
 </body>
 </html>

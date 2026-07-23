@@ -82,6 +82,49 @@
     }
   });
 
+  /* ---------- Live stats: poll dashboard cards + sidebar badges (no refresh) ---------- */
+  function setLiveStat(id, val){
+    const el = document.getElementById(id);
+    if(!el || val == null) return;
+    if(String(el.textContent).trim() !== String(val)){
+      el.textContent = val;
+      el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
+    }
+  }
+  function setLiveBadge(selector, val){
+    const el = document.querySelector(selector);
+    if(!el || val == null) return;
+    if(el.textContent.trim() !== String(val)){
+      el.textContent = val;
+      el.classList.toggle('red', Number(val) > 0);
+      el.classList.remove('badge-pulse'); void el.offsetWidth; el.classList.add('badge-pulse');
+    }
+  }
+  async function pollLiveStats(){
+    try{
+      const res = await fetch(procurementUrl('live-stats'), { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } });
+      if(!res.ok) return;
+      const j = await res.json();
+      if(!j) return;
+      if(j.cards){
+        setLiveStat('dash-stat-po',  j.cards.activePos);
+        setLiveStat('dash-stat-sup', j.cards.suppliers);
+        setLiveStat('dash-stat-req', j.cards.requisitions);
+        setLiveStat('dash-stat-inv', j.cards.deliveries);
+      }
+      if(j.badges){
+        setLiveBadge("a[href*='purchase-orders'] .nav-badge", j.badges.purchaseOrders);
+        setLiveBadge("a[href*='requisitions'] .nav-badge", j.badges.requisitions);
+        setLiveBadge("a[href*='deliveries'] .nav-badge", j.badges.deliveries);
+      }
+    }catch(err){ /* keep last known values */ }
+  }
+  window.pollLiveStats = pollLiveStats;
+  document.addEventListener('DOMContentLoaded', ()=>{
+    pollLiveStats();
+    setInterval(pollLiveStats, 15000);
+  });
+
   function showPage(page, navEl){
     ALL_PAGES.forEach(p => {
       const sec = document.getElementById('page-' + p);

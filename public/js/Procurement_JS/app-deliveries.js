@@ -18,7 +18,7 @@
     document.getElementById('track-body').innerHTML = `
       <div class="detail-grid">
         <div class="detail-card"><h4>Shipment summary</h4><div class="modal-row"><span>Shipment no.</span><span>${ship}</span></div><div class="modal-row"><span>PO number</span><span>${d.po || textFrom(row.children[1])}</span></div><div class="modal-row"><span>Supplier</span><span>${supplier}</span></div><div class="modal-row"><span>Status</span><span>${textFrom(row.children[5])}</span></div></div>
-        <div class="detail-card"><h4>Tracking info</h4><div class="modal-row"><span>Date</span><span>${dateLabel}</span></div><div class="modal-row"><span>Carrier</span><span>${d.carrier || 'Assigned carrier'}</span></div><div class="modal-row"><span>Current stage</span><span>${Math.min(stage + 1, 5)} / 5</span></div><div class="modal-row"><span>Delivery note</span><span>${d.note || 'No additional note'}</span></div></div>
+        <div class="detail-card"><h4>Tracking info</h4><div class="modal-row"><span>Date</span><span>${dateLabel}</span></div><div class="modal-row"><span>Deliver to</span><span>${d.warehouse || '—'}</span></div><div class="modal-row"><span>Carrier</span><span>${d.carrier || 'Assigned carrier'}</span></div><div class="modal-row"><span>Current stage</span><span>${Math.min(stage + 1, 5)} / 5</span></div><div class="modal-row"><span>Delivery note</span><span>${d.note || 'No additional note'}</span></div></div>
       </div>
     `;
     const markReceivedBtn = document.getElementById('mark-received-btn');

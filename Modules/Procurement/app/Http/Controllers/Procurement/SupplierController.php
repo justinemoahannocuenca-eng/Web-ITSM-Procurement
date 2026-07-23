@@ -5,11 +5,43 @@ namespace Modules\Procurement\Http\Controllers\Procurement;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Modules\Inventory\Models\Warehouse;
 
 class SupplierController extends Controller
 {
+    /**
+     * Insert one supplier_products row per product, including its category
+     * when the categories column exists (see EnsureProcurementClientColumns).
+     */
+    private function replaceSupplierProducts(int $supplierId, array $products): void
+    {
+        $hasCategories = Schema::connection('procurement')->hasColumn('supplier_products', 'categories');
+
+        DB::connection('procurement')->table('supplier_products')->where('supplier_id', $supplierId)->delete();
+
+        foreach ($products as $product) {
+            if (empty($product['name'])) {
+                continue;
+            }
+
+            $row = [
+                'supplier_id' => $supplierId,
+                'name' => $product['name'],
+                'sku' => $product['sku'] ?? null,
+                'unit_price' => $product['price'] ?? 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($hasCategories) {
+                $row['categories'] = $product['category'] ?? null;
+            }
+
+            DB::connection('procurement')->table('supplier_products')->insert($row);
+        }
+    }
     private function table(string $name)
     {
         $query = DB::connection('procurement')->table($name);
@@ -64,18 +96,17 @@ class SupplierController extends Controller
             'brand'       => 'nullable|string|max:100',
             'status'      => 'nullable|string|max:20',
             'productsJson'=> 'nullable|string',
-            'warehouse_id'=> 'required|integer',
+            'warehouse_id'=> 'nullable|integer',
         ]);
 
-        $warehouse = Warehouse::query()
-            ->whereKey((int) $validated['warehouse_id'])
-            ->where('status', 'active')
-            ->first();
-
-        if (! $warehouse) {
-            throw ValidationException::withMessages([
-                'warehouse_id' => 'Select an active warehouse belonging to your client.',
-            ]);
+        // Warehouse is optional (matches nexora — no warehouse on the supplier
+        // form). Only validate one when provided.
+        $warehouse = null;
+        if (! empty($validated['warehouse_id'])) {
+            $warehouse = Warehouse::query()
+                ->whereKey((int) $validated['warehouse_id'])
+                ->where('status', 'active')
+                ->first();
         }
 
         $products = [];
@@ -94,27 +125,14 @@ class SupplierController extends Controller
             'phone' => $validated['phone'] ?? null,
             'address' => $validated['address'] ?? null,
             'brand' => $validated['brand'] ?? null,
-            'warehouse_id' => $warehouse->id,
+            'warehouse_id' => $warehouse?->id,
             'status' => $validated['status'] ?? 'active',
             'product_items' => json_encode($products),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
-        foreach ($products as $product) {
-            if (empty($product['name'])) {
-                continue;
-            }
-
-            DB::connection('procurement')->table('supplier_products')->insert([
-                'supplier_id' => $supplierId,
-                'name' => $product['name'],
-                'sku' => $product['sku'] ?? null,
-                'unit_price' => $product['price'] ?? 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
+        $this->replaceSupplierProducts($supplierId, $products);
 
         // NOTE: original code called an ErpIntegrationService here with an
         // undefined $supplier variable and no `use` import for the class —
@@ -135,6 +153,7 @@ class SupplierController extends Controller
             'address' => 'nullable|string|max:255',
             'brand' => 'nullable|string|max:100',
             'warehouse_id' => 'nullable|integer',
+            'productsJson' => 'nullable|string',
         ]);
 
         if (array_key_exists('warehouse_id', $validated) && $validated['warehouse_id'] !== null) {
@@ -152,7 +171,7 @@ class SupplierController extends Controller
             $validated['warehouse_id'] = $warehouse->id;
         }
 
-        $this->table('suppliers')->where('id', $supplier)->update([
+        $update = [
             'name' => $validated['name'] ?? DB::raw('name'),
             'contact_person' => $validated['contact'] ?? DB::raw('contact_person'),
             'email' => $validated['email'] ?? DB::raw('email'),
@@ -161,7 +180,18 @@ class SupplierController extends Controller
             'brand' => $validated['brand'] ?? DB::raw('brand'),
             'warehouse_id' => $validated['warehouse_id'] ?? DB::raw('warehouse_id'),
             'updated_at' => now(),
-        ]);
+        ];
+
+        // Products (name/sku/price/category) are edited as a whole list in the
+        // modal; when sent, they replace the supplier's product catalog.
+        if ($request->filled('productsJson')) {
+            $decoded = json_decode($request->input('productsJson'), true);
+            $products = is_array($decoded) ? $decoded : [];
+            $update['product_items'] = json_encode($products);
+            $this->replaceSupplierProducts((int) $supplier, $products);
+        }
+
+        $this->table('suppliers')->where('id', $supplier)->update($update);
 
         return response()->json(['status' => 'ok']);
     }

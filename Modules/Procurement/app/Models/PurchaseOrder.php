@@ -11,7 +11,7 @@ class PurchaseOrder extends Model
         'po_number', 'supplier_id', 'qty', 'amount', 'status', 'priority',
         'order_date', 'expected_delivery_date', 'created_by', 'remarks',
         'item', 'brand', 'unit_price', 'requisition_id',
-        'requisition_reference', 'department',
+        'requisition_reference', 'department', 'warehouse_id', 'delivery_address',
     ];
 
     public function supplier()
