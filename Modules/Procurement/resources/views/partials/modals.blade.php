@@ -149,7 +149,7 @@
         </div>
         <div class="form-field">
           <label>Created By</label>
-          <input name="createdBy" value="John Reyes">
+          <input name="createdBy" value="Justine Nocuenca">
         </div>
         <div class="form-field">
           <label>Expected Delivery <span class="req">*</span></label>
