@@ -36,6 +36,10 @@
           <div class="status-label">Processing</div>
           <div class="status-count">{{ $statusCounts->get('processing', 0) }}</div>
         </div>
+        <div class="status-chart-item delivered" data-status="delivered" style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-color:#4caf50;" onclick="filterByStatus('po-table', 'delivered', this)">
+          <div class="status-label">Delivered</div>
+          <div class="status-count">{{ $statusCounts->get('delivered', 0) }}</div>
+        </div>
         <div class="status-chart-item completed" data-status="completed" style="background:linear-gradient(135deg,#e0f2f1,#b2dfdb);border-color:#009688;" onclick="filterByStatus('po-table', 'completed', this)">
           <div class="status-label">Completed</div>
           <div class="status-count">{{ $statusCounts->get('completed', 0) }}</div>
@@ -66,13 +70,22 @@
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
               <option value="cancelled">Cancelled</option>
+              <option value="delivered">Delivered</option>
               <option value="completed">Completed</option>
             </select>
           </div>
           <div class="filter-group">
             <label>Date Range</label>
-            <input type="date" id="po-filter-date-from" placeholder="From"> 
-            <input type="date" id="po-filter-date-to" placeholder="To">
+            <div class="date-range">
+              <input type="date" id="po-filter-date-from" placeholder="From">
+              <span class="date-range-sep">→</span>
+              <input type="date" id="po-filter-date-to" placeholder="To">
+            </div>
+            <div class="date-presets">
+              <button type="button" class="date-preset" onclick="setDatePreset('po','today',this)">Today</button>
+              <button type="button" class="date-preset" onclick="setDatePreset('po','week',this)">This Week</button>
+              <button type="button" class="date-preset" onclick="setDatePreset('po','month',this)">This Month</button>
+            </div>
           </div>
           <div class="filter-group">
             <label>Amount</label>

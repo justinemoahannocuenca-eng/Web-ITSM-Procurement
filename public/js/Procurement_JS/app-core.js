@@ -149,6 +149,55 @@
     }
   }
 
+  // Hook called after adding a record and when opening a status-chart page.
+  // It must exist: several flows (submitAddPO / submitAddDelivery / showPage)
+  // call it, and while it was missing those handlers threw a ReferenceError on
+  // this line — right before closing their modal — which is why the Add PO and
+  // Log Delivery modals stayed open after a successful submit.
+  //
+  // The per-status chart counts are rendered server-side from full-table
+  // totals (the PO table itself only loads the 8 most recent rows), so we must
+  // NOT recompute them from the DOM here — that would undercount. The live
+  // cards/badges are refreshed separately by pollLiveStats(); the chart totals
+  // refresh on the next page load.
+  function updateStatusCounts(){ /* intentionally a no-op — see note above */ }
+
+  /* ---------- Theme (light / dark) ---------- */
+  function applyStoredTheme(){
+    const saved = localStorage.getItem('procurement-theme');
+    if(saved) document.documentElement.setAttribute('data-theme', saved);
+  }
+  function toggleTheme(){
+    const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('procurement-theme', next);
+  }
+  applyStoredTheme();
+
+  /* ---------- Profile dropdown ---------- */
+  function toggleProfileMenu(e){
+    if(e) e.stopPropagation();
+    document.getElementById('profile-dropdown')?.classList.toggle('open');
+  }
+  document.addEventListener('click', (e) => {
+    const menu = document.querySelector('.profile-menu');
+    if(menu && !menu.contains(e.target)){
+      document.getElementById('profile-dropdown')?.classList.remove('open');
+    }
+  });
+
+  // Requisitions page tabs: "Requests" (the requisition table) and
+  // "Defect Items" (placeholder table, built out later).
+  function switchReqTab(tab, el){
+    document.querySelectorAll('#req-tabs .tab').forEach(t => t.classList.remove('active'));
+    if(el) el.classList.add('active');
+    const requests = document.getElementById('req-tab-requests');
+    const defects = document.getElementById('req-tab-defects');
+    if(requests) requests.classList.toggle('hidden', tab !== 'requests');
+    if(defects) defects.classList.toggle('hidden', tab !== 'defects');
+  }
+
   function animateDashboard(){
     // Bars grow
     document.querySelectorAll('#dash-category-bars .bar').forEach(b => { b.style.height = '0px'; });

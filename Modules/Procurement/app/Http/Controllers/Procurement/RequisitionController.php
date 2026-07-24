@@ -220,13 +220,29 @@ class RequisitionController extends Controller
             if ($po) {
                 $poStatus = strtolower(trim($po->status ?? 'pending'));
                 $currentStatus = strtolower(trim($req->status ?? 'pending'));
-                if (in_array($currentStatus, ['pending', 'processing', ''], true)) {
-                    if (in_array($poStatus, ['pending', 'approved', 'processing'], true)) {
-                        $req->status = 'Processing';
-                    } elseif ($poStatus === 'completed') {
-                        $req->status = 'Completed';
-                    }
+
+                // A requisition's fulfillment status follows its purchase order:
+                //   PO pending/approved -> Processing  (a PO exists for it)
+                //   PO processing       -> In Transit  (logged in Deliveries)
+                //   PO delivered        -> Delivered   (shipment delivered)
+                //   PO completed        -> Completed
+                $derived = [
+                    'pending' => 'Processing',
+                    'approved' => 'Processing',
+                    'processing' => 'In Transit',
+                    'delivered' => 'Delivered',
+                    'completed' => 'Completed',
+                ];
+
+                // Only advance requisitions still in an early/derived state so a
+                // manually-set terminal status (e.g. Rejected) is never
+                // overwritten. 'approved' is included so an approved requisition
+                // moves to Processing once its PO exists.
+                $advanceable = ['pending', 'approved', 'processing', 'in transit', 'intransit', 'delivered', ''];
+                if (isset($derived[$poStatus]) && in_array($currentStatus, $advanceable, true)) {
+                    $req->status = $derived[$poStatus];
                 }
+
                 $req->po_number = $po->po_number;
                 $req->po_status = $po->status;
             }
@@ -235,7 +251,7 @@ class RequisitionController extends Controller
         });
 
         $statusCounts = $requisitions->map(function ($req) {
-            return strtolower(str_replace(' ', '-', $req->status ?? 'Pending'));
+            return strtolower(str_replace(' ', '', $req->status ?? 'Pending'));
         })->countBy();
 
         return view('procurement::pages.requisitions', compact('requisitions', 'statusCounts'));

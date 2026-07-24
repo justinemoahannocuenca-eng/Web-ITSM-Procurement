@@ -6,7 +6,7 @@
 <section id="page-requisitions">
       @php
         $statusCounts = $statusCounts ?? collect($requisitions)->map(function ($req) {
-            return strtolower(str_replace(' ', '-', $req->status ?? 'Pending'));
+            return strtolower(str_replace(' ', '', $req->status ?? 'Pending'));
         })->countBy();
       @endphp
 
@@ -14,6 +14,13 @@
         <h1>Requisitions</h1>
         <p>All purchase requisitions</p>
       </div>
+
+      <div class="filter-tabs" id="req-tabs" style="margin-bottom:16px;">
+        <div class="tab active" data-req-tab="requests" onclick="switchReqTab('requests', this)">Requests</div>
+        <div class="tab" data-req-tab="defects" onclick="switchReqTab('defects', this)">Defect Items</div>
+      </div>
+
+      <div id="req-tab-requests">
 
       <div class="status-chart" id="requisition-status-chart">
         <div class="status-chart-item pending" data-status="pending" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border-color:#ff9800;" onclick="filterByStatus('requisitions-table', 'pending', this)">
@@ -69,8 +76,16 @@
           </div>
           <div class="filter-group">
             <label>Date Range</label>
-            <input type="date" id="req-filter-date-from" placeholder="From"> 
-            <input type="date" id="req-filter-date-to" placeholder="To">
+            <div class="date-range">
+              <input type="date" id="req-filter-date-from" placeholder="From">
+              <span class="date-range-sep">→</span>
+              <input type="date" id="req-filter-date-to" placeholder="To">
+            </div>
+            <div class="date-presets">
+              <button type="button" class="date-preset" onclick="setDatePreset('req','today',this)">Today</button>
+              <button type="button" class="date-preset" onclick="setDatePreset('req','week',this)">This Week</button>
+              <button type="button" class="date-preset" onclick="setDatePreset('req','month',this)">This Month</button>
+            </div>
           </div>
           <div class="filter-group">
             <label>Priority</label>
@@ -104,7 +119,7 @@
           </thead>
           <tbody>
             @forelse($requisitions as $req)
-              <tr data-id="{{ $req->id ?? '' }}" data-status="{{ strtolower(str_replace(' ', '-', $req->status ?? 'Pending')) }}" data-date="{{ $req->request_date }}" data-uom="{{ $req->uom ?? 'pcs' }}" data-notes="{{ $req->notes ?? '' }}" data-po="{{ isset($req->po_number) ? $req->po_number : '' }}" data-has-po="{{ isset($req->po_number) && $req->po_number ? '1' : '0' }}">
+              <tr data-id="{{ $req->id ?? '' }}" data-status="{{ strtolower(str_replace(' ', '', $req->status ?? 'Pending')) }}" data-date="{{ $req->request_date }}" data-uom="{{ $req->uom ?? 'pcs' }}" data-notes="{{ $req->notes ?? '' }}" data-po="{{ isset($req->po_number) ? $req->po_number : '' }}" data-has-po="{{ isset($req->po_number) && $req->po_number ? '1' : '0' }}">
                 <td><a class="po-link">{{ $req->requisition_number }}</a></td>
                 <td>{{ $req->item }}</td>
                 <td>{{ $req->qty }}</td>
@@ -117,9 +132,9 @@
                 <td><span class="priority-pill {{ $priorityClass }}">{{ strtoupper($req->priority ?? 'NORMAL') }}</span></td>
                 <td>{{ $req->department }}</td>
                 <td>{{ $req->requested_by }}</td>
-                <td><span class="status-pill {{ strtolower(str_replace(' ', '-', $req->status ?? 'Pending')) }}">{{ $req->status ?? 'Pending' }}</span></td>
+                <td><span class="status-pill {{ strtolower(str_replace(' ', '', $req->status ?? 'Pending')) }}">{{ $req->status ?? 'Pending' }}</span></td>
                 <td>{{ $req->request_date ? \Carbon\Carbon::parse($req->request_date)->format('M d, Y') : '—' }}</td>
-                <td><span class="row-actions"><button title="View"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button><button title="Edit"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button><button class="del" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></td>
+                <td><span class="row-actions"><button title="View"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button></span></td>
               </tr>
             @empty
               <tr>
@@ -136,5 +151,39 @@
           <div class="pager"><button class="page-btn">‹</button><button class="page-btn active">1</button><button class="page-btn">›</button></div>
         </div>
       </div>
+
+      </div>{{-- /#req-tab-requests --}}
+
+      <div id="req-tab-defects" class="hidden">
+        <div class="panel">
+          <div class="table-toolbar">
+            <h2>Defect Items</h2>
+            <div class="search-box">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <input placeholder="Search defect items...">
+            </div>
+          </div>
+          <table class="data-table" id="defect-items-table">
+            <thead>
+              <tr>
+                <th>DEFECT #</th>
+                <th>ITEM</th>
+                <th>QTY</th>
+                <th>REASON</th>
+                <th>REPORTED BY</th>
+                <th>STATUS</th>
+                <th>DATE</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="7" style="text-align:center; padding:40px 16px; color:var(--text-muted);">
+                  Defect Items tracking is coming soon.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>{{-- /#req-tab-defects --}}
     </section>
 @endsection

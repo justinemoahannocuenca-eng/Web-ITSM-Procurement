@@ -98,6 +98,21 @@
       return response.json();
     });
   }
+  // Requisition Approve / Reject — driven from the request's View Details
+  // modal. Approving is what unlocks the "Create Purchase Order" button;
+  // rejecting hides it. Persistence depends on the external requisition source
+  // having a status column.
+  function setRequisitionDecision(row, decision){
+    if(!row) return;
+    const ref = textFrom(row.children[0]);
+    updateRowStatus(row, decision);
+    persistRequisitionStatus(row, decision).catch(() => {});
+    closeViewModal();
+    showToast(
+      `Requisition ${ref} ${decision.toLowerCase()}`,
+      decision === 'Approved' ? 'ok' : 'no'
+    );
+  }
   function syncRelatedRequisitionStatusForPO(row, poStatus){
     if(!row) return;
     const lookupRef = row.dataset.reqRef || textFrom(row.children[0]);
@@ -189,7 +204,9 @@
     }
     if(type === 'req'){
       const ref = textFrom(row.children[0]);
-      return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, priority:row.dataset.priority || 'Normal', delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1'};
+      // items: a multi-line requisition can expose its lines via data-items
+      // (JSON [{name?,qty}]); single-line requisitions fall back to item/qty.
+      return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, items:getPoItems(row), priority:row.dataset.priority || textFrom(row.children[3]) || 'Normal', delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1'};
     }
     if(type === 'invoice'){
       const inv = textFrom(row.children[0]);
@@ -218,7 +235,7 @@
     bind(right ? approveBtn : approveBtn, right, 'btn-approve');
     if(poBtn){
       if(!po){ poBtn.style.display = 'none'; poBtn.onclick = null; }
-      else{ poBtn.style.display = ''; poBtn.onclick = po.onClick; }
+      else{ poBtn.style.display = ''; poBtn.textContent = po.label || 'Create Purchase Order'; poBtn.className = `btn ${po.className || 'btn-primary'}`; poBtn.onclick = po.onClick; }
     }
   }
 
@@ -254,14 +271,17 @@
       body = `<div class="detail-grid"><div class="detail-card"><h4>Order overview</h4><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Category</span><span>${htmlEscape(record.category)}</span></div><div class="modal-row"><span>Total quantity</span><span>${record.qty || '—'}</span></div></div><div class="detail-card"><h4>Commercial details</h4><div class="modal-row"><span>Total amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Unit price</span><span>${record.unitPrice}</span></div><div class="modal-row"><span>Priority</span><span>${priorityBadge(record.priority || 'Normal')}</span></div><div class="modal-row"><span>Delivery status</span><span>${htmlEscape(record.delivery)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div><div class="modal-row"><span>Date & time</span><span>${htmlEscape(record.date)} · ${htmlEscape(record.time)}</span></div></div><div class="detail-card full"><h4>Items</h4>${poItemsMarkup}</div><div class="detail-card full"><h4>Workflow</h4><div class="modal-row"><span>Requested by</span><span>${htmlEscape(record.requestedBy)}</span></div><div class="modal-row"><span>Expected delivery</span><span>${htmlEscape(record.expected)}</span></div></div></div><div class="detail-note"><b>Remarks</b><br>${htmlEscape(record.remarks)}</div>`;
       const statusKey = String(record.status || '').toLowerCase();
       if(statusKey === 'pending'){
+        // Pending is the only status that can be cancelled.
         setViewActions(
           {label:'Reject PO', className:'btn-reject', onClick:()=>{ persistPurchaseOrderStatus(row, 'Rejected').then(() => { updateRowStatus(row, 'Rejected'); syncRelatedRequisitionStatusForPO(row, 'Rejected'); closeViewModal(); showToast(`${record.po} rejected`, 'no'); }).catch(() => showToast('Unable to reject this PO. It was not changed.', 'no')); }},
-          {label:'Approve PO', className:'btn-approve', onClick:()=>{ persistPurchaseOrderStatus(row, 'Approved').then(() => { updateRowStatus(row, 'Approved'); syncRelatedRequisitionStatusForPO(row, 'Approved'); closeViewModal(); showToast(`${record.po} approved for fulfillment`, 'ok'); }).catch(() => showToast('Unable to approve this PO. It remains pending.', 'no')); }}
+          {label:'Approve PO', className:'btn-approve', onClick:()=>{ persistPurchaseOrderStatus(row, 'Approved').then(() => { updateRowStatus(row, 'Approved'); syncRelatedRequisitionStatusForPO(row, 'Approved'); closeViewModal(); showToast(`${record.po} approved for fulfillment`, 'ok'); }).catch(() => showToast('Unable to approve this PO. It remains pending.', 'no')); }},
+          {label:'Cancel PO', className:'btn-danger', onClick:()=> openCancelModalFromRow(row)}
         );
       } else if(statusKey === 'approved'){
+        // Approved POs can no longer be cancelled (enforced server-side too).
         setViewActions(
           {label:'Close', className:'btn-view', onClick:closeViewModal},
-          {label:'Cancel PO', className:'btn-danger', onClick:()=> openCancelModalFromRow(row)}
+          null
         );
       } else {
         setViewActions(
@@ -275,8 +295,22 @@
       setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null);
     } else if(record.type === 'req'){
       body = `<div class="detail-grid"><div class="detail-card"><h4>Request details</h4><div class="modal-row"><span>Requisition no.</span><span>${htmlEscape(record.ref)}</span></div><div class="modal-row"><span>Item</span><span>${htmlEscape(record.item)}</span></div><div class="modal-row"><span>Quantity</span><span>${record.qty} ${htmlEscape(record.uom)}</span></div><div class="modal-row"><span>Delivery status</span><span>${htmlEscape(record.delivery)}</span></div></div><div class="detail-card"><h4>Request workflow</h4><div class="modal-row"><span>Department</span><span>${htmlEscape(record.dept)}</span></div><div class="modal-row"><span>Requested by</span><span>${htmlEscape(record.requester)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div><div class="modal-row"><span>Date & time</span><span>${htmlEscape(record.date)} · ${htmlEscape(record.time)}</span></div></div></div><div class="detail-note"><b>Justification</b><br>${htmlEscape(record.notes)}</div>`;
-      const poBtn = record.hasPO ? null : {label:'Create Purchase Order', className:'btn-primary', onClick:()=>{ convertReqToPO(record.ref, record.item, record.qty); closeViewModal(); }};
-      setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null, poBtn);
+      const reqStatus = String(record.status || '').toLowerCase().trim();
+      if(reqStatus === 'pending' || reqStatus === ''){
+        // An undecided request is approved or rejected from right here.
+        setViewActions(
+          {label:'Reject Request', className:'btn-reject', onClick:()=> setRequisitionDecision(row, 'Rejected')},
+          {label:'Approve Request', className:'btn-approve', onClick:()=> setRequisitionDecision(row, 'Approved')},
+          null
+        );
+      } else {
+        // "Create Purchase Order" only shows for an Approved requisition that
+        // doesn't already have a PO. A Rejected one hides it entirely.
+        const poBtn = (!record.hasPO && reqStatus === 'approved')
+          ? {label:'Create Purchase Order', className:'btn-primary', onClick:()=>{ convertReqToPO(record.ref, record.item, record.qty, record.priority, record.items); closeViewModal(); }}
+          : null;
+        setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null, poBtn);
+      }
     } else if(record.type === 'invoice'){
       body = `<div class="detail-grid"><div class="detail-card"><h4>Invoice overview</h4><div class="modal-row"><span>Invoice no.</span><span>${htmlEscape(record.inv)}</span></div><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Invoice date</span><span>${htmlEscape(record.date)}</span></div></div><div class="detail-card"><h4>Payment details</h4><div class="modal-row"><span>Amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Due date</span><span>${htmlEscape(record.dueDate)}</span></div><div class="modal-row"><span>Payment method</span><span>${htmlEscape(record.method)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div></div><div class="detail-note"><b>Notes</b><br>${htmlEscape(record.notes)}</div>`;
       if(record.status !== 'Paid') setViewActions({label:'Flag issue', className:'btn-reject', onClick:()=>{ closeViewModal(); showToast(`${record.inv} flagged for review`, 'info'); }},{label:'Mark as paid', className:'btn-approve', onClick:()=>{ updateRowStatus(row,'Paid'); row.dataset.notes = 'Marked paid from view modal.'; closeViewModal(); showToast(`${record.inv} marked as paid`, 'ok'); }});
@@ -555,8 +589,9 @@
         wrap.innerHTML = trackBtn;
         return;
       }
-      const singleViewTables = ['po-table','requisitions-table'];
-      if(singleViewTables.includes(tableId)) {
+      // Both tables expose a single View action; approving/rejecting a
+      // requisition happens inside its View Details modal.
+      if(tableId === 'po-table' || tableId === 'requisitions-table') {
         wrap.innerHTML = viewBtn;
         return;
       }
@@ -581,8 +616,7 @@
       openTrackModal(btn);
       return;
     }
-    const singleViewTables = ['po-table','requisitions-table'];
-    if(singleViewTables.includes(tableId)) {
+    if(tableId === 'po-table' || tableId === 'requisitions-table') {
       openViewModal(btn);
       return;
     }

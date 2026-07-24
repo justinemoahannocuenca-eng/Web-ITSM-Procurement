@@ -48,48 +48,11 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               <input placeholder="Search shipment or PO..." oninput="filterTable('deliveries-table', this.value)">
             </div>
-             <button class="toolbar-btn" onclick="toggleFilterPanel('del-filter-panel', this)">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            Filter
-          </button>
+            
             <button class="toolbar-btn primary" onclick="openAddModal('delivery')">+ Log Delivery</button>
           </div>
-        </div>
-        <div class="filter-panel hidden" id="del-filter-panel">
-          <div class="filter-group">
-            <label>Status</label>
-            <select id="delivery-filter-status" onchange="applyDelFilter()">
-              <option value="">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="intransit">intransit</option>
-              <option value="delayed">Delayed</option>
-              <option value="delivered">Delivered</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Date Range</label>
-            <input type="date" id="delivery-filter-date-from" placeholder="From"> 
-            <input type="date" id="delivery-filter-date-to" placeholder="To">
-          </div>
-          <div class="filter-group">
-            <label>Supplier</label>
-            <select id="delivery-filter-supplier" onchange="applyDelFilter()">
-              <option value="">All Suppliers</option>
-              <option value="TechWholesale PH">TechWholesale PH</option>
-              <option value="Quantum Motherboards">Quantum Motherboards</option>
-              <option value="Silverline PSU Ltd">Silverline PSU Ltd</option>
-              <option value="Primo Electronics">Primo Electronics</option>
-              <option value="GigaCore Components">GigaCore Components</option>
-            </select>
-          </div>
-          <div class="filter-actions">
-            <button class="btn-text" onclick="clearDelFilter()">Clear</button>
-            <button class="btn-primary" onclick="applyDelFilter()">Apply</button>
-          </div>
-        </div>
+      
+     
 
         <table class="data-table sortable-table" id="deliveries-table">
             <thead>
@@ -151,7 +114,7 @@
           </table>
           
 
-      
+        </div>
       </div>
     </section>
 @endsection

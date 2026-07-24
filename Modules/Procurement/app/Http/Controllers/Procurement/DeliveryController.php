@@ -5,7 +5,6 @@ namespace Modules\Procurement\Http\Controllers\Procurement;
 use App\Http\Controllers\Controller;
 use Modules\Procurement\Models\Delivery;
 use Modules\Procurement\Models\PurchaseOrder;
-use Modules\Procurement\Models\Requisition;
 use Modules\Procurement\Models\Supplier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -117,6 +116,7 @@ class DeliveryController extends Controller
             'qty' => ['required', 'integer', 'min:1'],
             'status' => ['nullable', 'string', 'in:intransit,delayed'],
             'remarks' => ['nullable', 'string'],
+            'carrier' => ['nullable', 'string', 'max:255'],
             'warehouse_id' => ['nullable', 'integer'],
         ]);
 
@@ -129,6 +129,17 @@ class DeliveryController extends Controller
         }
 
         $purchaseOrder = PurchaseOrder::where('po_number', $data['po'])->first();
+
+        // Server-side guard: a PO can only be logged in Deliveries once it is
+        // Approved (or already Processing from a prior delivery). Pending,
+        // Rejected and Cancelled POs must be rejected here, not just hidden in
+        // the UI.
+        if ($purchaseOrder && ! in_array(strtolower((string) $purchaseOrder->status), ['approved', 'processing'], true)) {
+            return response()->json([
+                'message' => 'Only approved purchase orders can be logged in deliveries.',
+            ], 422);
+        }
+
         $supplier = Supplier::where('name', $data['supplier'])->first();
 
         if (! $supplier) {
@@ -153,6 +164,7 @@ class DeliveryController extends Controller
             'qty_expected' => (int) $data['qty'],
             'items' => $data['items'],
             'remarks' => $data['remarks'] ?? null,
+            'carrier' => $data['carrier'] ?? null,
             'delivery_date' => $data['delDate'],
             'estimated_arrival' => $purchaseOrder?->expected_delivery_date,
             // The selected warehouse's name is stored in the deliver_to_warehouse
@@ -161,20 +173,11 @@ class DeliveryController extends Controller
         ]);
 
         if ($purchaseOrder) {
-            $purchaseOrder->update(['delivery_status' => 'intransit', 'status' => 'processing']);
-
-            $requisition = null;
-            if (! empty($purchaseOrder->requisition_reference)) {
-                $requisition = Requisition::where('req_number', $purchaseOrder->requisition_reference)->first();
-            }
-
-            if (! $requisition && $purchaseOrder->requisition_id) {
-                $requisition = Requisition::find($purchaseOrder->requisition_id);
-            }
-
-            if ($requisition) {
-                $requisition->update(['delivery_status' => 'intransit']);
-            }
+            // Logging a delivery moves the PO to Processing. The linked
+            // requisition's status is derived from the PO status when the
+            // Requisitions page renders (see RequisitionController@index), so it
+            // does not need to be written here.
+            $purchaseOrder->update(['status' => 'processing']);
         }
 
         return response()->json([
@@ -192,9 +195,10 @@ class DeliveryController extends Controller
             'po' => ['nullable', 'string', 'max:255'],
             'supplier' => ['nullable', 'string', 'max:255'],
             'date' => ['nullable', 'date'],
-            'status' => ['nullable', 'string', 'in:pending,shipment,intransit,delayed,delivered,complete,cancel'],
+            'status' => ['nullable', 'string', 'in:pending,scheduled,intransit,delayed,delivered,completed,cancelled'],
             'carrier' => ['nullable', 'string', 'max:255'],
             'note' => ['nullable', 'string'],
+            'remarks' => ['nullable', 'string'],
         ]);
 
         $purchaseOrder = ($data['po'] ?? null)
@@ -219,12 +223,12 @@ class DeliveryController extends Controller
         $status = strtolower((string) ($data['status'] ?? $delivery->status));
         $stageMap = [
             'pending' => 0,
-            'shipment' => 1,
+            'scheduled' => 0,
             'intransit' => 2,
-            'delivered' => 3,
-            'complete' => 4,
             'delayed' => 2,
-            'cancel' => 0,
+            'delivered' => 3,
+            'completed' => 4,
+            'cancelled' => 0,
         ];
 
         $updateData = [
@@ -244,27 +248,27 @@ class DeliveryController extends Controller
         if ($data['date'] ?? null) {
             $updateData['delivery_date'] = $data['date'];
         }
-        if ($data['note'] ?? null) {
-            $updateData['remarks'] = $data['note'];
+        $remarks = $data['note'] ?? $data['remarks'] ?? null;
+        if ($remarks !== null) {
+            $updateData['remarks'] = $remarks;
         }
 
         $delivery->update($updateData);
 
-        if ($purchaseOrder && $status === 'complete') {
-            $purchaseOrder->update(['status' => 'completed', 'delivery_status' => 'complete']);
-
-            $requisition = null;
-            if (! empty($purchaseOrder->requisition_reference)) {
-                $requisition = Requisition::where('req_number', $purchaseOrder->requisition_reference)->first();
-            }
-
-            if (! $requisition && $purchaseOrder->requisition_id) {
-                $requisition = Requisition::find($purchaseOrder->requisition_id);
-            }
-
-            if ($requisition) {
-                $requisition->update(['status' => 'completed', 'delivery_status' => 'complete']);
-            }
+        // Cascade the shipment status back to the parent PO. The linked
+        // requisition's status is derived from the PO status at render time
+        // (RequisitionController@index), so updating the PO is enough.
+        //   intransit / delayed -> PO Processing
+        //   delivered           -> PO Delivered
+        //   completed           -> PO Completed
+        $poStatusFromDelivery = [
+            'intransit' => 'processing',
+            'delayed' => 'processing',
+            'delivered' => 'delivered',
+            'completed' => 'completed',
+        ];
+        if ($purchaseOrder && isset($poStatusFromDelivery[$status])) {
+            $purchaseOrder->update(['status' => $poStatusFromDelivery[$status]]);
         }
 
         return response()->json(['success' => true, 'data' => $delivery]);

@@ -6,6 +6,10 @@
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <title>@yield('title', 'Nexora ERP — Procurement Suite')</title>
 <link rel="stylesheet" href="{{ asset('css/procurement.css') }}">
+<script>
+  // Apply the saved theme before first paint to avoid a light/dark flash.
+  (function(){ try { var t = localStorage.getItem('procurement-theme'); if(t) document.documentElement.setAttribute('data-theme', t); } catch(e){} })();
+</script>
 </head>
 <body>
 

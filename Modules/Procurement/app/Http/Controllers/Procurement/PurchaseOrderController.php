@@ -102,7 +102,6 @@ class PurchaseOrderController extends Controller
             ->leftJoin('suppliers', 'purchase_orders.supplier_id', '=', 'suppliers.id')
             ->select('purchase_orders.*', 'suppliers.name as supplier_name')
             ->orderBy('purchase_orders.created_at', 'desc')
-            ->limit(8)
             ->get();
 
         // Item breakdown per PO (name/qty/price), used for the View modal's
@@ -328,19 +327,47 @@ class PurchaseOrderController extends Controller
         $status = $validated['status'] ?? null;
         if ($status !== null) {
             $status = strtolower(trim($status));
-            $allowed = ['pending', 'approved', 'rejected', 'cancelled', 'processing', 'completed'];
+            $allowed = ['pending', 'approved', 'rejected', 'cancelled', 'processing', 'completed', 'delivered'];
             if (!in_array($status, $allowed, true)) {
                 $status = null;
             }
         }
 
-        $purchaseOrderQuery = $this->table('purchase_orders')->where('id', $purchaseOrder);
+        $existing = $this->table('purchase_orders')->where('id', $purchaseOrder)->first();
 
-        if (! $purchaseOrderQuery->exists()) {
+        if (! $existing) {
             abort(404, 'Purchase order not found for this client.');
         }
 
-        $purchaseOrderQuery->update([
+        // Enforce the PO status lifecycle server-side (not just by hiding
+        // buttons). Only these transitions are legal:
+        //   pending    -> approved | rejected | cancelled
+        //   approved   -> processing | delivered | completed   (via deliveries)
+        //   processing -> delivered | completed                (via deliveries)
+        //   delivered  -> completed
+        //   rejected / cancelled / completed -> (terminal)
+        // Cancelling is only possible while Pending.
+        $current = strtolower(trim((string) ($existing->status ?? 'pending')));
+        if ($status !== null && $status !== $current) {
+            $transitions = [
+                'pending' => ['approved', 'rejected', 'cancelled', 'processing'],
+                'approved' => ['processing', 'delivered', 'completed'],
+                'processing' => ['delivered', 'completed'],
+                'delivered' => ['completed'],
+                'rejected' => [],
+                'cancelled' => [],
+                'completed' => [],
+            ];
+
+            if (! in_array($status, $transitions[$current] ?? [], true)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => sprintf('Cannot change purchase order from "%s" to "%s".', $current, $status),
+                ], 422);
+            }
+        }
+
+        $this->table('purchase_orders')->where('id', $purchaseOrder)->update([
             'status' => $status ?? DB::raw('status'),
             'amount' => $validated['amount'] ?? DB::raw('amount'),
             'remarks' => $validated['remarks'] ?? DB::raw('remarks'),

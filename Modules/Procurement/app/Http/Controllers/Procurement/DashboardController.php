@@ -34,6 +34,47 @@ class DashboardController extends Controller
     }
 
     /**
+     * Requisitions live on the external Order Fulfillment / Manufacturing
+     * databases — the same source the Requisitions page reads. Counting
+     * procurement.requisitions (which is empty) always returned 0, which is why
+     * the dashboard card read "0".
+     *
+     * @return array{total:int, pending:int}
+     */
+    private function externalRequisitionCounts(): array
+    {
+        $total = 0;
+        $pending = 0;
+
+        foreach (['order_fulfillment', 'manufacturing'] as $connectionName) {
+            try {
+                $connection = DB::connection($connectionName);
+                $schema = $connection->getSchemaBuilder();
+
+                if (! $schema->hasTable('requisitions')) {
+                    continue;
+                }
+
+                $total += (int) $connection->table('requisitions')->count();
+
+                if ($schema->hasColumn('requisitions', 'status')) {
+                    $pending += (int) $connection->table('requisitions')
+                        ->whereIn('status', ['Pending', 'pending'])
+                        ->count();
+                } else {
+                    // No status column (Order Fulfillment): those rows surface
+                    // as Pending on the Requisitions page.
+                    $pending += (int) $connection->table('requisitions')->count();
+                }
+            } catch (\Throwable $e) {
+                // Skip broken or unavailable external connections.
+            }
+        }
+
+        return ['total' => $total, 'pending' => $pending];
+    }
+
+    /**
      * Lightweight JSON counts polled by the dashboard + sidebar so cards and
      * nav badges update live (no page refresh). Every query is wrapped so a
      * missing table/column/connection can never turn this into a 500.
@@ -61,33 +102,21 @@ class DashboardController extends Controller
             }
         };
 
-        // Requisitions live on the Manufacturing / OrderFulfillment connection
-        // (same source the sidebar badge uses).
-        $requisitionPending = 0;
-        foreach (['order_fulfillment', 'manufacturing'] as $conn) {
-            try {
-                $external = DB::connection($conn);
-                if ($external->getSchemaBuilder()->hasTable('requisitions')) {
-                    $requisitionPending = $external->getSchemaBuilder()->hasColumn('requisitions', 'status')
-                        ? (int) $external->table('requisitions')->whereIn('status', ['Pending', 'pending'])->count()
-                        : (int) $external->table('requisitions')->count();
-                    break;
-                }
-            } catch (\Throwable $e) {
-                // try the next connection
-            }
-        }
+        // Requisitions live on the external Order Fulfillment / Manufacturing
+        // databases (same source the Requisitions page and sidebar badge use),
+        // never on the procurement connection.
+        $requisitionCounts = $this->externalRequisitionCounts();
 
         return response()->json([
             'cards' => [
                 'activePos' => $safe(fn () => $table('purchase_orders')->count()),
                 'suppliers' => $safe(fn () => $table('suppliers')->where('status', 'active')->count()),
-                'requisitions' => $safe(fn () => $table('requisitions')->count()),
+                'requisitions' => $requisitionCounts['total'],
                 'deliveries' => $safe(fn () => $table('deliveries')->count()),
             ],
             'badges' => [
                 'purchaseOrders' => $safe(fn () => $table('purchase_orders')->where('status', 'pending')->count()),
-                'requisitions' => $requisitionPending,
+                'requisitions' => $requisitionCounts['pending'],
                 'deliveries' => $safe(fn () => $table('deliveries')->whereIn('status', ['pending', 'scheduled', 'intransit'])->count()),
             ],
         ]);
@@ -117,7 +146,8 @@ class DashboardController extends Controller
             ->toArray();
 
         $supplierCount = $table('suppliers')->where('status', 'active')->count();
-        $requisitionCount = $table('requisitions')->count();
+        // From the external requisition sources, not procurement.requisitions.
+        $requisitionCount = $this->externalRequisitionCounts()['total'];
         $deliveryCount = $table('deliveries')->count();
         $pendingDeliveries = $table('deliveries')
             ->whereIn('status', ['pending', 'scheduled', 'intransit'])

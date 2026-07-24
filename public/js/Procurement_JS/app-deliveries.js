@@ -28,12 +28,11 @@
         <div class="detail-card full"><h4>Items</h4>${itemsMarkup}</div>
       </div>
     `;
-    // An in-transit shipment can't be completed — it hasn't arrived yet. Only
-    // delayed/delivered shipments may be marked completed.
+    // Delivered status is driven by the existing (Inventory-received) flow, not
+    // a manual button here. Only a Delivered shipment can be marked Completed.
     const markCompletedBtn = document.getElementById('mark-completed-btn');
     if (markCompletedBtn) {
-      const canComplete = ['delayed', 'delivered'].includes(currentStatus);
-      markCompletedBtn.style.display = canComplete ? 'block' : 'none';
+      markCompletedBtn.style.display = currentStatus === 'delivered' ? 'block' : 'none';
     }
     document.getElementById('track-modal').__row = row;
     document.getElementById('track-modal').classList.add('open');
@@ -41,35 +40,24 @@
   function closeTrackModal(){
     document.getElementById('track-modal').classList.remove('open');
   }
-  function markReceived(){
-    const row = document.getElementById('track-modal').__row;
-    if(row){
-      row.dataset.status = 'delivered';
-      row.dataset.stage = '4';
-      row.children[5].innerHTML = statusPill('Delivered');
-      const poRow = findPoRowByNumber(row.dataset.po || '');
-      if(poRow){
-        poRow.dataset.status = 'processing';
-        poRow.children[5].innerHTML = statusPill('Processing');
-      }
-      // Persist delivery status to backend when possible
-      const delId = row.dataset.id;
-      if(delId){
-        fetch(procurementUrl(`deliveries/${delId}`), { method: 'PUT', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'X-Requested-With':'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: new URLSearchParams({ status: 'delivered', remarks: row.dataset.note || '' }).toString() }).then(()=>{}).catch(()=>showToast('Unable to persist delivery status to server.', 'no'));
-      }
-      // Persist related PO status if present
-      const relatedPoRow = findPoRowByNumber(row.dataset.po || '');
-      if(relatedPoRow && relatedPoRow.dataset.id){
-        fetch(procurementUrl(`purchase-orders/${relatedPoRow.dataset.id}`), { method: 'PUT', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'X-Requested-With':'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: new URLSearchParams({ status: 'processing' }).toString() }).then(()=>{}).catch(()=>{});
-      }
-      const reqRow = findReqRowByRef(row.dataset.po || '');
-      if(reqRow){
-        updateRequisitionStatus(row.dataset.po || '', 'Delivered');
-        persistRequisitionStatus(reqRow, 'Delivered');
-      }
-      showToast(`${row.dataset.ship} marked as received`, 'ok');
+  // Persist a shipment status change and reflect it on the PO / requisition
+  // rows. The server (DeliveryController@update) cascades the delivery status
+  // to the parent PO, so we only PUT the delivery; the PO/req rows are updated
+  // client-side for instant feedback and re-derive correctly on reload.
+  function persistShipmentStatus(row, deliveryStatus, poLabel, reqLabel){
+    const delId = row.dataset.id;
+    if(delId){
+      fetch(procurementUrl(`deliveries/${delId}`), { method: 'PUT', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'X-Requested-With':'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: new URLSearchParams({ status: deliveryStatus, remarks: row.dataset.note || '' }).toString() }).then(()=>{}).catch(()=>showToast('Unable to persist delivery status to server.', 'no'));
     }
-    closeTrackModal();
+    const poRow = findPoRowByNumber(row.dataset.po || '');
+    if(poRow){
+      poRow.dataset.status = poLabel.toLowerCase();
+      poRow.children[5].innerHTML = statusPill(poLabel);
+    }
+    const reqRow = findReqRowByRef(row.dataset.po || '');
+    if(reqRow){
+      updateRequisitionStatus(row.dataset.po || '', reqLabel);
+    }
   }
 
   function markCompleted(){
@@ -78,24 +66,7 @@
       row.dataset.status = 'completed';
       row.dataset.stage = '4';
       row.children[5].innerHTML = statusPill('Completed');
-      const poRow = findPoRowByNumber(row.dataset.po || '');
-      if(poRow){
-        poRow.dataset.status = 'completed';
-        poRow.children[5].innerHTML = statusPill('Completed');
-      }
-      const delId = row.dataset.id;
-      if(delId){
-        fetch(procurementUrl(`deliveries/${delId}`), { method: 'PUT', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'X-Requested-With':'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: new URLSearchParams({ status: 'completed', remarks: row.dataset.note || '' }).toString() }).then(()=>{}).catch(()=>showToast('Unable to persist delivery status to server.', 'no'));
-      }
-      const relatedPoRow2 = findPoRowByNumber(row.dataset.po || '');
-      if(relatedPoRow2 && relatedPoRow2.dataset.id){
-        fetch(procurementUrl(`purchase-orders/${relatedPoRow2.dataset.id}`), { method: 'PUT', headers: { 'Content-Type':'application/x-www-form-urlencoded', 'X-Requested-With':'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: new URLSearchParams({ status: 'completed' }).toString() }).then(()=>{}).catch(()=>{});
-      }
-      const reqRow2 = findReqRowByRef(row.dataset.po || '');
-      if(reqRow2){
-        updateRequisitionStatus(row.dataset.po || '', 'Completed');
-        persistRequisitionStatus(reqRow2, 'Completed');
-      }
+      persistShipmentStatus(row, 'completed', 'Completed', 'Completed');
       showToast(`${row.dataset.ship} marked as completed`, 'ok');
     }
     closeTrackModal();

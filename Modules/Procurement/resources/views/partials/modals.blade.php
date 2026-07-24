@@ -334,13 +334,14 @@
           <input type="date" name="delDate" required>
         </div>
         <div class="form-field">
-          <label>Warehouse <span class="req">*</span></label>
-          <select name="warehouse_id" id="delivery-warehouse-select" required>
-            <option value="">Select the receiving warehouse...</option>
-            @foreach($warehouses ?? collect() as $warehouse)
-              <option value="{{ $warehouse->id }}">{{ $warehouse->name }}{{ $warehouse->address ? ' — '.$warehouse->address : '' }}</option>
-            @endforeach
-          </select>
+          <label>Carrier</label>
+          <input type="text" name="carrier" placeholder="e.g. LBC, J&T, in-house fleet">
+        </div>
+
+       <div class="form-field">
+          <label>Total Amount</label>
+          <input type="text" name="amount" placeholder="₱0.00" readonly>
+        </div>
         </div>
       <div class="form-field full">
           <label>Items Purchased</label>
@@ -349,11 +350,15 @@
           </div>
           <input type="hidden" name="items" id="delivery-items-value">
         </div>
-
-       <div class="form-field">
-          <label>Total Amount</label>
-          <input type="text" name="amount" placeholder="₱0.00" readonly>
-        </div>
+ <div class="form-field full">
+          <label>Warehouse <span class="req">*</span></label>
+          <select name="warehouse_id" id="delivery-warehouse-select" required>
+            <option value="">Select the receiving warehouse...</option>
+            @foreach($warehouses ?? collect() as $warehouse)
+              <option value="{{ $warehouse->id }}">{{ $warehouse->name }}{{ $warehouse->address ? ' — '.$warehouse->address : '' }}</option>
+            @endforeach
+          </select>
+      
         
        
         <div class="form-field full">

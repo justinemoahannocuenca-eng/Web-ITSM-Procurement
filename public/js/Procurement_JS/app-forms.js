@@ -438,9 +438,22 @@
       // clear these because their defaultValue gets mutated once assigned.
       if(reqData){
         setModalFieldValue(modal, 'reqRef', reqData.reqNum || '');
-        if(reqData.qty){
-          const firstQty = modal.querySelector('#po-items-rows .po-item-row .po-item-qty');
-          if(firstQty) firstQty.value = reqData.qty;
+        // A requisition may carry several item lines. Generate one PO item row
+        // per requested line and auto-fill ONLY the quantity — the category and
+        // item selections are left for the user to pick. Single-item
+        // requisitions fall back to filling the first row's quantity.
+        const reqItems = Array.isArray(reqData.items) && reqData.items.length
+          ? reqData.items
+          : (reqData.qty ? [{ qty: reqData.qty }] : []);
+        if(reqItems.length){
+          resetPoItemRows(modal);
+          reqItems.forEach((it, i) => {
+            const row = i === 0
+              ? modal.querySelector('#po-items-rows .po-item-row')
+              : addPoItemRow(modal);
+            const qtyField = row?.querySelector('.po-item-qty');
+            if(qtyField) qtyField.value = it.qty ?? '';
+          });
         }
         setModalFieldValue(modal, 'priority', normalizePriorityLabel(reqData.priority));
       } else {
@@ -513,8 +526,8 @@
 
   // Convert Requisition to PO — carry the requisition's priority through so the
   // new PO keeps the requested priority instead of defaulting to Normal.
-  function convertReqToPO(reqNum, item, qty, priority){
-    const reqData = { reqNum, item, qty, priority };
+  function convertReqToPO(reqNum, item, qty, priority, items){
+    const reqData = { reqNum, item, qty, priority, items: Array.isArray(items) ? items : null };
     openAddModal('po', reqData);
   }
 
@@ -954,6 +967,7 @@
         delDate: d.delDate || '',
         status: statusLabel,
         remarks: d.remarks || '',
+        carrier: d.carrier || '',
         warehouse_id: d.warehouse_id || ''
       }).toString()
     }).then(res => res.json().then(json => ({ ok: res.ok, json }))).then(({ ok, json }) => {
@@ -974,7 +988,7 @@
         tr.dataset.items = d.items || '';
         tr.dataset.stage = stage;
         tr.dataset.note = d.remarks || `${d.items} · Qty ${d.qty}`;
-        tr.dataset.carrier = 'Assigned carrier';
+        tr.dataset.carrier = d.carrier || 'Assigned carrier';
         tr.dataset.expected = expectedDate;
         tr.dataset.warehouse = (document.querySelector('#delivery-warehouse-select')?.selectedOptions?.[0]?.textContent || '').trim();
         // Only the first item is shown in the table; the rest live in the

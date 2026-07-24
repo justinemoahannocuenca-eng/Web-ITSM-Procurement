@@ -66,7 +66,7 @@
     .nav-link:hover{color:var(--white);}
     .nav-link.active{color:var(--corp-blue);}
    
-   .nav-right { display:flex; align-items:center; gap:10px; }
+   .nav-right { display:flex; align-items:center; gap:10px; margin-left:auto; }
     .avatar{width:35px;height:35px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600}
     .body{display:flex;flex:1}
     
@@ -397,6 +397,12 @@
 .row-actions button.create-po-btn{ color:var(--green); font-weight:bold; }
 .row-actions button.create-po-btn:hover{ color:var(--green); transform:scale(1.25); }
 .row-actions .del:hover{ color:var(--red); }
+  .table-footer{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    margin-top:14px; padding-top:14px; border-top:1px solid var(--border);
+    font-size:12.5px; color:var(--muted);
+  }
+  .table-footer br{ display:none; } /* legacy spacer in existing markup */
   .table-footer b{ color:var(--orange); }
   .pager{ display:inline-flex; align-items:center; gap:6px; color:var(--muted); }
   .pager .page-btn{
@@ -936,7 +942,8 @@
   .dash-grid-3 .panel .chart-bar-list{
     display:flex;
     flex-direction:column;
-    gap:10px;
+    /* Roomy enough that the 5 categories fill the panel height. */
+    gap:18px;
   }
   .dash-grid-3 .panel .chart-bar-item{
     display:grid;
@@ -952,22 +959,25 @@
     overflow:hidden;
     text-overflow:ellipsis;
   }
+  /* Thick horizontal bars — 5 of them should read clearly at a glance. */
   .dash-grid-3 .panel .chart-bar-track{
-    height:6px;
-    background:var(--bg);
+    height:25px;
+    background:var(--gray-light);
     border-radius:3px;
     overflow:hidden;
   }
   .dash-grid-3 .panel .chart-bar-fill{
     height:100%;
-    background:var(--blue);
-    border-radius:3px;
+    background:linear-gradient(90deg,var(--blue),#5b8def);
     transition:width .6s ease;
   }
+  .dash-grid-3 .panel .chart-bar-label{
+    font-size:12.5px;
+  }
   .dash-grid-3 .panel .chart-bar-value{
-    font-size:11px;
+    font-size:12px;
     font-weight:700;
-    color:var(--muted);
+    color:var(--text);
     text-align:right;
   }
   
@@ -1098,9 +1108,9 @@
   .donut-legend-item:hover{ background:var(--bg); }
 
   /* Spend-by-brand bars: gradient fill + rounded track reads less flat */
-  .chart-bar-track{ border-radius:20px; overflow:hidden; background:var(--bg); }
+  .chart-bar-track{  overflow:hidden; background:var(--bg); }
   .chart-bar-fill{
-    background:var(--accent-grad); border-radius:20px;
+    background:var(--accent-grad); 
     transition: width .6s cubic-bezier(.4,0,.2,1);
   }
   .chart-bar-label{ font-weight:600; }
@@ -1289,3 +1299,217 @@
   font-size:11.5px; color:var(--text); background:#fff; outline:none;
 }
 .product-chip-category-input:focus{ border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12); }
+
+/* ============================================================
+   Nav-right: theme toggle + avatar profile menu
+   ============================================================ */
+/* Light/dark switch lives inside the profile dropdown. */
+.theme-icon-moon{ display:none; }
+:root[data-theme="dark"] .theme-icon-sun{ display:none; }
+:root[data-theme="dark"] .theme-icon-moon{ display:block; }
+
+.theme-switch-row{
+  width:100%; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:10px 12px; margin-bottom:4px; border:none; background:transparent; cursor:pointer;
+  border-radius:9px; font-family:inherit; transition:background .15s ease;
+}
+.theme-switch-row:hover{ background:var(--gray-light); }
+.theme-switch-row .tsr-label{
+  display:inline-flex; align-items:center; gap:9px;
+  font-size:13px; font-weight:600; color:var(--text);
+}
+.theme-switch-row svg{ color:var(--muted); flex-shrink:0; }
+.theme-switch{
+  position:relative; width:38px; height:22px; border-radius:999px;
+  background:var(--border); flex-shrink:0; transition:background .2s ease;
+}
+.theme-switch-knob{
+  position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%;
+  background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:left .2s ease;
+}
+:root[data-theme="dark"] .theme-switch{ background:var(--blue); }
+:root[data-theme="dark"] .theme-switch-knob{ left:18px; }
+
+.profile-menu{ position:relative; }
+.avatar-btn{
+  width:36px; height:36px; border-radius:50%; border:1px solid rgba(255,255,255,0.22);
+  background:linear-gradient(135deg,var(--sky),var(--corp-blue)); color:#fff; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; padding:0; transition:transform .15s ease;
+}
+.avatar-btn:hover{ transform:translateY(-1px); }
+.avatar-initials{ font-size:12.5px; font-weight:700; letter-spacing:.4px; }
+.avatar-initials.lg{
+  width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--sky),var(--corp-blue)); color:#fff; font-size:15px; flex-shrink:0;
+}
+.profile-dropdown{
+  position:absolute; top:calc(100% + 10px); right:0; width:250px; background:var(--card);
+  border:1px solid var(--border); border-radius:14px; box-shadow:0 18px 42px -14px rgba(11,30,61,0.35);
+  padding:8px; opacity:0; transform:translateY(-6px); pointer-events:none; transition:opacity .16s ease, transform .16s ease;
+  z-index:200;
+}
+.profile-dropdown.open{ opacity:1; transform:translateY(0); pointer-events:auto; }
+.profile-header{ display:flex; gap:12px; align-items:center; padding:12px; border-bottom:1px solid var(--border); margin-bottom:6px; }
+.profile-id{ min-width:0; }
+.profile-id strong{ display:block; font-size:14px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.profile-email{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.profile-role{ display:inline-block; margin-top:5px; font-size:10.5px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.4px; color:var(--blue); background:var(--blue-light); padding:2px 8px; border-radius:999px; }
+.profile-logout{
+  width:100%; display:flex; align-items:center; gap:9px; justify-content:center; padding:10px;
+  border:none; background:transparent; color:var(--red); font-size:13px; font-weight:600; cursor:pointer;
+  border-radius:9px; transition:background .15s ease;
+}
+.profile-logout:hover{ background:var(--red-light); }
+
+/* ============================================================
+   Filter panel: date range + presets
+   ============================================================ */
+.date-range{ display:flex; align-items:center; gap:8px; }
+.date-range input[type="date"]{
+  border:1px solid var(--border); border-radius:8px; padding:7px 9px; font-size:12.5px;
+  color:var(--text); background:var(--card); outline:none;
+}
+.date-range input[type="date"]:focus{ border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12); }
+.date-range-sep{ color:var(--muted); font-size:12px; }
+.date-presets{ display:flex; gap:6px; margin-top:8px; }
+.date-preset{
+  border:1px solid var(--border); background:var(--card); color:var(--muted); cursor:pointer;
+  font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:999px; transition:.15s ease;
+}
+.date-preset:hover{ border-color:var(--blue); color:var(--blue); }
+.date-preset.active{ background:var(--blue); border-color:var(--blue); color:#fff; }
+.filter-group > label{ display:block; font-size:11px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.4px; color:var(--muted); margin-bottom:6px; }
+
+/* Active-sort header indicator */
+.data-table th.sortable.sort-asc,
+.data-table th.sortable.sort-desc{ color:var(--blue); }
+
+/* ============================================================
+   Dark mode
+   ============================================================ */
+:root[data-theme="dark"]{
+  --bg:#0f1729;
+  --card:#161f33;
+  --border:#26304a;
+  --text:#e7ecf6;
+  --muted:#94a3c0;
+  --gray-light:#1d2740;
+  --blue-light:#1c2b4d;
+  --green-light:#12301f;
+  --orange-light:#3a2a12;
+  --red-light:#3a1c1f;
+  --purple-light:#241a45;
+  --teal-light:#0f2e2b;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.35);
+}
+:root[data-theme="dark"] body{ background:var(--bg); color:var(--text); }
+
+/* Tell the browser to render native controls (date pickers, select popups,
+   scrollbars, autofill) dark. Without this, date/select fields render with a
+   white popup and near-invisible text. */
+:root[data-theme="dark"]{ color-scheme:dark; }
+
+/* ---- Filter panels ---- */
+:root[data-theme="dark"] .filter-panel{
+  background:var(--card); border-color:var(--border);
+  box-shadow:0 10px 28px rgba(0,0,0,0.45);
+}
+:root[data-theme="dark"] .filter-group label,
+:root[data-theme="dark"] .filter-group > label{ color:var(--muted); }
+/* These hardcode #fff / #d7dde8 in the light theme — override explicitly. */
+:root[data-theme="dark"] .filter-group input,
+:root[data-theme="dark"] .filter-group select,
+:root[data-theme="dark"] .date-range input[type="date"]{
+  background:var(--gray-light); color:var(--text); border-color:var(--border);
+}
+:root[data-theme="dark"] .filter-group input::placeholder,
+:root[data-theme="dark"] .search-box input::placeholder{ color:var(--muted); }
+:root[data-theme="dark"] .date-preset{ background:var(--gray-light); border-color:var(--border); color:var(--muted); }
+:root[data-theme="dark"] .date-preset:hover{ border-color:var(--blue); color:var(--blue); }
+:root[data-theme="dark"] .date-preset.active{ background:var(--blue); border-color:var(--blue); color:#fff; }
+:root[data-theme="dark"] .btn-text:hover{ background:var(--gray-light); color:var(--text); }
+
+/* ---- Toolbar / search / inputs ---- */
+:root[data-theme="dark"] .search-box{ background:var(--gray-light); border-color:var(--border); }
+:root[data-theme="dark"] .search-box input,
+:root[data-theme="dark"] .toolbar-btn,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] textarea{ background:var(--card); color:var(--text); border-color:var(--border); }
+:root[data-theme="dark"] .search-box input{ background:transparent; border:none; }
+:root[data-theme="dark"] .toolbar-btn:hover{ background:var(--gray-light); }
+:root[data-theme="dark"] .toolbar-btn.primary{ background:var(--blue); color:#fff; border-color:var(--blue); }
+
+/* ---- Status chart tiles ---- */
+/* Their pastel gradients are inline styles, so light text sat on a light tile.
+   Use the dark surface and keep the inline border colour as the accent. */
+:root[data-theme="dark"] .status-chart-item{ background:var(--card) !important; }
+:root[data-theme="dark"] .status-chart-item .status-label{ color:var(--muted); }
+:root[data-theme="dark"] .status-chart-item .status-count{ color:var(--text); }
+
+/* ---- Tables ---- */
+:root[data-theme="dark"] .data-table tbody tr:hover{ background:rgba(255,255,255,0.04); }
+:root[data-theme="dark"] .data-table th{ color:var(--muted); border-bottom-color:var(--border); }
+:root[data-theme="dark"] .data-table td{ border-bottom-color:var(--border); }
+:root[data-theme="dark"] .table-footer{ color:var(--muted); border-top-color:var(--border); }
+:root[data-theme="dark"] .page-btn{ background:var(--card); border-color:var(--border); color:var(--muted); }
+:root[data-theme="dark"] .page-btn.active{ background:var(--blue); border-color:var(--blue); color:#fff; }
+:root[data-theme="dark"] .sort-arrows svg{ color:#4a5878; }
+
+/* ---- Modals & chips ---- */
+:root[data-theme="dark"] .modal-box{ background:var(--card); color:var(--text); }
+:root[data-theme="dark"] .modal-overlay{ background:rgba(0,0,0,0.62); }
+:root[data-theme="dark"] .product-chip,
+:root[data-theme="dark"] .supplier-product-tag,
+:root[data-theme="dark"] .product-list-empty,
+:root[data-theme="dark"] .modal-helper{ background:var(--gray-light); color:var(--text); border-color:var(--border); }
+:root[data-theme="dark"] .product-list-empty,
+:root[data-theme="dark"] .modal-helper{ color:var(--muted); }
+
+/* ---- Charts ---- */
+:root[data-theme="dark"] .vbar-track,
+:root[data-theme="dark"] .chart-bar-track{ background:var(--gray-light); }
+
+/* ============================================================
+   Modal polish pass (#13) — spacing, hierarchy and typography.
+   Kept additive (no change to .modal-box padding) so modals whose
+   content isn't wrapped in a padded region don't lose their insets.
+   ============================================================ */
+.modal-box .modal-head{ align-items:center; padding-bottom:14px; border-bottom:1px solid var(--border); }
+.modal-box .modal-head h3{ font-size:18px; letter-spacing:-0.01em; }
+.modal-box .modal-head p{ font-size:12.5px; color:var(--muted); margin-top:2px; }
+.modal-box .modal-actions{ padding-top:16px; border-top:1px solid var(--border); }
+
+/* Detail cards (view modals) — softer surface, clearer heading. */
+.detail-card{ background:var(--gray-light); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+.detail-card h4{
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
+  color:var(--muted); margin-bottom:8px;
+}
+.detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.detail-card.full{ grid-column:1 / -1; }
+.detail-note{
+  margin-top:14px; padding:14px 16px; background:var(--blue-light); border-radius:12px;
+  font-size:13px; line-height:1.55; color:var(--text);
+}
+
+/* Form fields — consistent label + control rhythm. */
+.form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; }
+.form-field{ display:flex; flex-direction:column; gap:6px; }
+.form-field.full{ grid-column:1 / -1; }
+.form-field label{ font-size:12px; font-weight:600; color:var(--muted); }
+.form-field input, .form-field select, .form-field textarea{
+  border:1px solid var(--border); border-radius:9px; padding:9px 11px; font-size:13px;
+  color:var(--text); background:var(--card); outline:none; transition:border-color .15s ease, box-shadow .15s ease;
+}
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus{
+  border-color:var(--blue); box-shadow:0 0 0 3px rgba(47,111,237,0.12);
+}
+.form-field input[readonly]{ background:var(--gray-light); color:var(--muted); }
+.form-field .req{ color:var(--red); }
+
+@media (max-width:640px){
+  .detail-grid, .form-grid{ grid-template-columns:1fr; }
+}

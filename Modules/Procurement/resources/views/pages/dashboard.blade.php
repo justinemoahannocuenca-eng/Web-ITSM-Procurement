@@ -31,7 +31,7 @@
         <div class="stat-card">
           <div class="stat-label">DELIVERIES</div>
           <div class="stat-value" id="dash-stat-inv">{{ $deliveryCount }}</div>
-          <div class="stat-sub">{{ $pendingDeliveries > 0 ? $pendingDeliveries . ' in progress' : 'No deliveries yet' }}</div>
+          <div class="stat-sub">{{ $deliveryCount > 0 ? ($pendingDeliveries > 0 ? $pendingDeliveries . ' in progress' : 'All shipments settled') : 'No deliveries yet' }}</div>
         </div>
       </div>
       
@@ -45,14 +45,16 @@
             @endif
           </div>
           @if(count($spendByCategory) > 0)
-          <div class="vbar-chart" id="chart-spend-category">
+          <div class="chart-bar-list" id="chart-spend-category">
             @foreach($spendByCategory as $item)
-            <div class="vbar-col" title="{{ $item->category }} · {{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}">
-              <div class="vbar-value">{{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}</div>
-              <div class="vbar-track">
-                <div class="vbar-fill" style="height: {{ $spendByCategory->max('total') > 0 ? ($item->total / $spendByCategory->max('total')) * 100 : 0 }}%"></div>
+            <div class="chart-bar-item-h" title="{{ $item->category }} · {{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}">
+              <div class="chart-bar-item-h-top">
+                <span class="chart-bar-label">{{ $item->category }}</span>
+                <span class="chart-bar-value">{{ $item->formatted_total ?? '₱' . number_format($item->total, 2) }}</span>
               </div>
-              <div class="vbar-label">{{ $item->category }}</div>
+              <div class="chart-bar-track">
+                <div class="chart-bar-fill" style="width: {{ $spendByCategory->max('total') > 0 ? ($item->total / $spendByCategory->max('total')) * 100 : 0 }}%"></div>
+              </div>
             </div>
             @endforeach
           </div>
@@ -118,9 +120,7 @@
       <div class="panel">
         <div class="filter-tabs" id="dash-po-tabs">
           <div class="tab active" data-filter="recent">Recent Purchase Orders</div>
-          <div class="tab" data-filter="cancelled">Cancelled</div>
-          <div class="tab" data-filter="pending">Pending</div>
-          <a href="#" onclick="event.preventDefault(); showPage('purchase-orders', document.querySelectorAll('.nav-item')[1])" style="margin-left:auto; color:var(--blue); font-weight:600; font-size:13px;">View all purchase orders →</a>
+          <a href="{{ route('procurement.purchase-orders.index') }}" style="margin-left:auto; color:var(--blue); font-weight:600; font-size:13px;">View all purchase orders →</a>
         </div>
         <table class="data-table" id="dash-po-table">
           <thead>
