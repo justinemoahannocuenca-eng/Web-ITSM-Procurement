@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Modules\Procurement\Models\Delivery;
 use Modules\Procurement\Models\PurchaseOrder;
 use Modules\Procurement\Models\Supplier;
+use Modules\Procurement\Services\RequisitionStatusWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -271,7 +272,23 @@ class DeliveryController extends Controller
             $purchaseOrder->update(['status' => $poStatusFromDelivery[$status]]);
         }
 
-        return response()->json(['success' => true, 'data' => $delivery]);
+        // Completing the shipment completes the requisition behind the PO
+        // (Processing -> Completed). Best-effort: a source without a status
+        // column simply reports not-ok and is ignored.
+        $requisitionStatus = null;
+        if ($purchaseOrder && $status === 'completed' && ! empty($purchaseOrder->requisition_reference)) {
+            $transition = (new RequisitionStatusWriter)->transitionByReference(
+                $purchaseOrder->requisition_reference,
+                RequisitionStatusWriter::COMPLETED
+            );
+            $requisitionStatus = $transition['ok'] ? $transition['status'] : null;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $delivery,
+            'requisition_status' => $requisitionStatus,
+        ]);
     }
 
     public function destroy(Delivery $delivery): JsonResponse

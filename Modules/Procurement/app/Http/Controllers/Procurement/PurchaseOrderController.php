@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Modules\Inventory\Models\Warehouse;
+use Modules\Procurement\Services\RequisitionStatusWriter;
 
 class PurchaseOrderController extends Controller
 {
@@ -181,6 +182,25 @@ class PurchaseOrderController extends Controller
             ]);
         }
 
+        // Only an Approved requisition may become a purchase order. Enforced
+        // here so a Pending/Rejected requisition can't be converted even if the
+        // button were reachable. (statusOfReference() returns null when the
+        // source stores no status — nothing to enforce in that case.)
+        $requisitionReference = $validated['reqRef'] ?? null;
+        $statusWriter = new RequisitionStatusWriter;
+        if (! empty($requisitionReference)) {
+            $requisitionStatus = $statusWriter->statusOfReference($requisitionReference);
+            if ($requisitionStatus !== null && strcasecmp($requisitionStatus, RequisitionStatusWriter::APPROVED) !== 0) {
+                throw ValidationException::withMessages([
+                    'reqRef' => sprintf(
+                        'Only approved requisitions can be converted to a purchase order (%s is "%s").',
+                        $requisitionReference,
+                        $requisitionStatus
+                    ),
+                ]);
+            }
+        }
+
         $totalQty = (int) array_sum(array_column($items, 'qty'));
         $totalAmount = (float) array_sum(array_column($items, 'amount'));
         $primaryCategory = $validated['category'] ?? ($items[0]['category'] ?? '');
@@ -273,6 +293,13 @@ class PurchaseOrderController extends Controller
             DB::connection('procurement')->table('purchase_order_items')->insert($itemInsert);
         }
 
+        // Creating the PO moves its requisition Approved -> Processing.
+        $requisitionStatus = null;
+        if (! empty($requisitionReference)) {
+            $transition = $statusWriter->transitionByReference($requisitionReference, RequisitionStatusWriter::PROCESSING);
+            $requisitionStatus = $transition['ok'] ? $transition['status'] : null;
+        }
+
         $validated['po'] = $savedPoNumber;
         $validated['item'] = $itemSummary;
         $validated['qty'] = $totalQty;
@@ -280,7 +307,13 @@ class PurchaseOrderController extends Controller
         $validated['category'] = $primaryCategory;
         $validated['items'] = $items;
 
-        return response()->json(['status' => 'ok', 'data' => $validated, 'id' => $poId, 'po_number' => $savedPoNumber]);
+        return response()->json([
+            'status' => 'ok',
+            'data' => $validated,
+            'id' => $poId,
+            'po_number' => $savedPoNumber,
+            'requisition_status' => $requisitionStatus,
+        ]);
     }
 
     /**

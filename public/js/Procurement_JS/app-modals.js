@@ -91,27 +91,34 @@
       },
       body: new URLSearchParams({ status: status }).toString()
     }).then(async response => {
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(`Requisition status update failed (${response.status})`);
+        // Surface the server's reason (e.g. an illegal status transition).
+        throw new Error(payload?.message || `Requisition status update failed (${response.status})`);
       }
 
-      return response.json();
+      return payload;
     });
   }
   // Requisition Approve / Reject — driven from the request's View Details
   // modal. Approving is what unlocks the "Create Purchase Order" button;
   // rejecting hides it. Persistence depends on the external requisition source
   // having a status column.
+  // The server owns the transition rules, so only repaint the badge once it
+  // confirms the write. On refusal we surface its reason and leave the row as-is.
   function setRequisitionDecision(row, decision){
     if(!row) return;
     const ref = textFrom(row.children[0]);
-    updateRowStatus(row, decision);
-    persistRequisitionStatus(row, decision).catch(() => {});
-    closeViewModal();
-    showToast(
-      `Requisition ${ref} ${decision.toLowerCase()}`,
-      decision === 'Approved' ? 'ok' : 'no'
-    );
+    persistRequisitionStatus(row, decision).then(() => {
+      updateRowStatus(row, decision);
+      closeViewModal();
+      showToast(
+        `Requisition ${ref} ${decision.toLowerCase()}`,
+        decision === 'Approved' ? 'ok' : 'no'
+      );
+    }).catch(err => {
+      showToast(err?.message || 'Unable to update this requisition.', 'no');
+    });
   }
   function syncRelatedRequisitionStatusForPO(row, poStatus){
     if(!row) return;

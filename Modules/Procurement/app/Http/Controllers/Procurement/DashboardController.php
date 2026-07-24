@@ -46,7 +46,7 @@ class DashboardController extends Controller
         $total = 0;
         $pending = 0;
 
-        foreach (['order_fulfillment', 'manufacturing'] as $connectionName) {
+        foreach (['order_fulfillment', 'inventory'] as $connectionName) {
             try {
                 $connection = DB::connection($connectionName);
                 $schema = $connection->getSchemaBuilder();

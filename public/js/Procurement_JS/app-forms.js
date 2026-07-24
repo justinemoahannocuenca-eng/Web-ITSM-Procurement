@@ -792,24 +792,11 @@
       if(d.reqRef){
         const reqRow = findReqRowByRef(d.reqRef);
         if(reqRow){
+          // Creating the PO already moved the requisition to Processing
+          // server-side (and across every row sharing its req_id), so just
+          // repaint the badge here — no second write.
           reqRow.dataset.po = d.po;
-          reqRow.dataset.status = 'processing';
-          reqRow.children[6].innerHTML = statusPill('Processing');
-          updateRowStatus(reqRow, 'Processing');
-          const reqId = reqRow.dataset.id;
-          if(reqId){
-            fetch(procurementUrl(`requisitions/${reqId}`), {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
-              },
-              body: new URLSearchParams({ status: 'Processing' }).toString()
-            }).then(() => {}).catch(() => {
-              console.warn('Unable to persist requisition status update for', reqId);
-            });
-          }
+          updateRowStatus(reqRow, json?.requisition_status || 'Processing');
         }
       }
       initRowActionButtons();

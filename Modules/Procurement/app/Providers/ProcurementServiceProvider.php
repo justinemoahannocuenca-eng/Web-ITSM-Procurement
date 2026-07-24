@@ -144,7 +144,7 @@ class ProcurementServiceProvider extends ServiceProvider
 
     private function resolveRequisitionConnection()
     {
-        foreach (['order_fulfillment', 'manufacturing'] as $connection) {
+        foreach (['order_fulfillment', 'inventory'] as $connection) {
             try {
                 if (DB::connection($connection)->getSchemaBuilder()->hasTable('requisitions')) {
                     return DB::connection($connection);
@@ -154,6 +154,6 @@ class ProcurementServiceProvider extends ServiceProvider
             }
         }
 
-        return DB::connection('manufacturing');
+        return DB::connection('inventory');
     }
 }
