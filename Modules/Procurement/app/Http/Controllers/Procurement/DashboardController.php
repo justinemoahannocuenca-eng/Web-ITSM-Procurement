@@ -181,11 +181,18 @@ class DashboardController extends Controller
         $hasItemCategory = Schema::connection('procurement')
             ->hasColumn('purchase_order_items', 'category');
 
+        // Spend figures only count POs that represent committed money. A PO that
+        // is still Pending, or was Rejected/Cancelled, must not contribute to
+        // total spend, category spend, or top-supplier spend.
+        $uncountedStatuses = ['pending', 'rejected', 'cancelled'];
+
         if ($hasItemCategory) {
             $spendByCategoryAll = $table('purchase_order_items')
+                ->join('purchase_orders', 'purchase_order_items.purchase_order_id', '=', 'purchase_orders.id')
                 ->select('purchase_order_items.category as category', DB::raw('SUM(purchase_order_items.amount) as total'))
                 ->whereNotNull('purchase_order_items.category')
                 ->where('purchase_order_items.category', '!=', '')
+                ->whereNotIn('purchase_orders.status', $uncountedStatuses)
                 ->groupBy('purchase_order_items.category')
                 ->orderByDesc('total')
                 ->get()
@@ -200,6 +207,7 @@ class DashboardController extends Controller
                 ->select('brand as category', DB::raw('SUM(amount) as total'))
                 ->whereNotNull('brand')
                 ->where('brand', '!=', '')
+                ->whereNotIn('status', $uncountedStatuses)
                 ->groupBy('brand')
                 ->orderByDesc('total')
                 ->get()
@@ -216,13 +224,13 @@ class DashboardController extends Controller
         $spendByCategory = $spendByCategoryAll->take(5)->values();
 
         $totalSpend = $table('purchase_orders')
-            ->whereNotIn('status', ['cancelled', 'rejected'])
+            ->whereNotIn('status', $uncountedStatuses)
             ->sum('amount');
 
         $topSuppliers = $table('purchase_orders')
             ->join('suppliers', 'purchase_orders.supplier_id', '=', 'suppliers.id')
             ->select('suppliers.id', 'suppliers.name', DB::raw('SUM(purchase_orders.amount) as total_spend'))
-            ->whereNotIn('purchase_orders.status', ['cancelled', 'rejected'])
+            ->whereNotIn('purchase_orders.status', $uncountedStatuses)
             ->when(! $rootTesting, fn ($query) => $query->where('suppliers.client_id', $clientId))
             ->groupBy('suppliers.id', 'suppliers.name')
             ->orderByDesc('total_spend')

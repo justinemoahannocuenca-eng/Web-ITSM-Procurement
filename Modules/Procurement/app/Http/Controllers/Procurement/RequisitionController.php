@@ -278,6 +278,7 @@ class RequisitionController extends Controller
     {
         $validated = $request->validate([
             'status' => 'nullable|string|max:20',
+            'ref' => 'nullable|string|max:100',
             'notes' => 'nullable|string',
         ]);
 
@@ -296,7 +297,14 @@ class RequisitionController extends Controller
                 ], 422);
             }
 
-            $result = (new RequisitionStatusWriter)->transitionById($requisition, $target);
+            $writer = new RequisitionStatusWriter;
+
+            // Prefer the unique requisition reference — the numeric id can
+            // collide across the Inventory / Order Fulfillment databases, which
+            // would target the wrong record. Fall back to id if no ref is sent.
+            $result = ! empty($validated['ref'])
+                ? $writer->transitionByReference($validated['ref'], $target)
+                : $writer->transitionById($requisition, $target);
 
             if (! $result['ok']) {
                 return response()->json([

@@ -138,9 +138,12 @@ class RequisitionStatusWriter
         }
 
         if (! $found['hasStatus']) {
-            // Order Fulfillment has no status column — nothing to write. Not an
-            // error for cascades, so callers can ignore it.
-            return ['ok' => false, 'code' => 409, 'message' => 'This requisition source does not store a status.'];
+            // Order Fulfillment has no status column — there is nothing to
+            // persist and no lifecycle to enforce. Treat it as a benign no-op
+            // success (not a 409) so the caller's optimistic UI update stands
+            // instead of surfacing an error. `persisted:false` signals that the
+            // change won't survive a reload for this source.
+            return ['ok' => true, 'status' => $target, 'updated' => 0, 'persisted' => false];
         }
 
         $current = trim((string) ($found['row']->status ?? self::PENDING));

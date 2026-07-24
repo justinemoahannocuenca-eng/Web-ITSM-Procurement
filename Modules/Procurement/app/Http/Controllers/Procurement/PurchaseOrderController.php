@@ -64,25 +64,48 @@ class PurchaseOrderController extends Controller
     }
 
     /**
-     * Insert the purchase order, automatically regenerating the po_number
-     * if it collides with one that already exists. This is what was making
-     * "Submit for Approval" silently fail: the browser pre-fills the PO
-     * number from an in-memory counter that resets on every page load, so
-     * once real PO numbers passed that counter, every new submission hit
-     * a duplicate po_number and the insert was rejected by the database.
+     * The next clean, sequential PO number: PO-{year}-{0001}. Derived from the
+     * highest existing number for the year, ignoring any legacy suffixed ones
+     * (e.g. "PO-2026-0002-20260724..."), so numbers stay short and orderly.
+     */
+    private function nextPurchaseOrderNumber(): string
+    {
+        $year = now()->year;
+        $prefix = "PO-{$year}-";
+
+        // Global uniqueness (the po_number UNIQUE constraint is not per-tenant),
+        // so this is intentionally not client-scoped.
+        $highest = DB::connection('procurement')->table('purchase_orders')
+            ->where('po_number', 'like', $prefix.'%')
+            ->pluck('po_number')
+            ->map(function (string $number) use ($prefix): int {
+                // Only "PO-YYYY-####" exactly — no trailing junk.
+                return preg_match('/^'.preg_quote($prefix, '/').'(\d+)$/', $number, $m) ? (int) $m[1] : 0;
+            })
+            ->max() ?? 0;
+
+        return $prefix.str_pad($highest + 1, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Insert the purchase order. The po_number is always assigned server-side
+     * from nextPurchaseOrderNumber(), so the browser's in-memory guess (which
+     * resets each page load and used to collide, then get an ugly timestamp
+     * suffix appended) is ignored. On the rare concurrent-insert collision we
+     * simply recompute the next number and retry.
      */
     private function insertPurchaseOrder(array $insert): int
     {
         $attempts = 0;
         $currentInsert = $insert;
+        $currentInsert['po_number'] = $this->nextPurchaseOrderNumber();
 
-        while ($attempts < 3) {
+        while ($attempts < 5) {
             try {
                 return DB::connection('procurement')->table('purchase_orders')->insertGetId($currentInsert);
             } catch (\Throwable $e) {
                 if ($this->isDuplicateKeyException($e)) {
-                    $suffix = now()->format('YmdHis') . '-' . random_int(1000, 9999);
-                    $currentInsert['po_number'] = $insert['po_number'] . '-' . $suffix;
+                    $currentInsert['po_number'] = $this->nextPurchaseOrderNumber();
                     $attempts++;
                     continue;
                 }

@@ -12,7 +12,8 @@
 
   async function loadNotifications(panel){
     if(!panel) return;
-    panel.innerHTML = '<div style="padding:12px;text-align:center;color:#7b8796">Loading notifications…</div>';
+    // No "Loading…" placeholder — the panel keeps its current content until the
+    // fresh list is ready, so opening it never flashes a loading state.
     try{
       const headers = { 'X-Requested-With': 'XMLHttpRequest' };
       // Fetch recent requisitions
