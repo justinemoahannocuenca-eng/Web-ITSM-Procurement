@@ -126,9 +126,8 @@
         </div>
 
         <div class="form-field full">
-          <label>Items <span class="req">*</span></label>
+          <label>Item <span class="req">*</span></label>
           <div id="po-items-rows"></div>
-          <button type="button" class="btn btn-small" style="margin-top:4px;" onclick="addPoItemRow(document.getElementById('add-po-modal'))">+ Add Item</button>
           <span class="hint">Select a supplier first to load its categories and items.</span>
         </div>
 
@@ -149,7 +148,7 @@
         </div>
         <div class="form-field">
           <label>Created By</label>
-          <input name="createdBy" value="Justine Nocuenca">
+          <input name="createdBy" value="{{ session('employee_name', auth()->user()->name ?? 'Employee') }}" readonly>
         </div>
         <div class="form-field">
           <label>Expected Delivery <span class="req">*</span></label>
@@ -231,11 +230,7 @@
         </div>
         <div class="form-field">
           <label>Phone Number <span class="req">*</span></label>
-          <input name="phone" placeholder="+63 9XX XXX XXXX" required>
-        </div>
-        <div class="form-field">
-          <label>Brand <span class="req">*</span></label>
-          <input name="brand" placeholder="e.g. Dell, HP" required>
+          <input name="phone" value="+63 " placeholder="+63 9XX XXX XXXX" required>
         </div>
         <div class="form-field full">
           <label>Products</label>
@@ -277,6 +272,10 @@
         <div class="form-field">
           <label>Category</label>
           <input name="productCategory" placeholder="e.g. Storage">
+        </div>
+        <div class="form-field">
+          <label>Brand</label>
+          <input name="productBrand" placeholder="e.g. Dell, HP">
         </div>
         <div class="form-field">
           <label>SKU code type</label>

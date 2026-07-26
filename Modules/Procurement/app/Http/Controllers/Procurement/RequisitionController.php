@@ -263,7 +263,31 @@ class RequisitionController extends Controller
             return strtolower(str_replace(' ', '', $req->status ?? 'Pending'));
         })->countBy();
 
-        return view('procurement::pages.requisitions', compact('requisitions', 'statusCounts'));
+        // Defect Items tab — read-only list of flagged defective parts from the
+        // Inventory database's `defects` table.
+        $defects = $this->defectItems();
+
+        return view('procurement::pages.requisitions', compact('requisitions', 'statusCounts', 'defects'));
+    }
+
+    /**
+     * Defect items reported in the Inventory module. Read-only here; wrapped so
+     * a missing table/connection never breaks the Requisitions page.
+     */
+    private function defectItems()
+    {
+        try {
+            $connection = DB::connection('inventory');
+            if (! $connection->getSchemaBuilder()->hasTable('defects')) {
+                return collect();
+            }
+
+            return $connection->table('defects')
+                ->orderByDesc('created_at')
+                ->get();
+        } catch (\Throwable $e) {
+            return collect();
+        }
     }
 
     /**

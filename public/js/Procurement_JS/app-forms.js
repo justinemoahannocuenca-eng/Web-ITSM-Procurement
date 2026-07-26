@@ -442,19 +442,11 @@
         // per requested line and auto-fill ONLY the quantity — the category and
         // item selections are left for the user to pick. Single-item
         // requisitions fall back to filling the first row's quantity.
-        const reqItems = Array.isArray(reqData.items) && reqData.items.length
-          ? reqData.items
-          : (reqData.qty ? [{ qty: reqData.qty }] : []);
-        if(reqItems.length){
-          resetPoItemRows(modal);
-          reqItems.forEach((it, i) => {
-            const row = i === 0
-              ? modal.querySelector('#po-items-rows .po-item-row')
-              : addPoItemRow(modal);
-            const qtyField = row?.querySelector('.po-item-qty');
-            if(qtyField) qtyField.value = it.qty ?? '';
-          });
-        }
+        // A PO now carries a single item row — fill just its quantity.
+        resetPoItemRows(modal);
+        const firstRow = modal.querySelector('#po-items-rows .po-item-row');
+        const qtyField = firstRow?.querySelector('.po-item-qty');
+        if(qtyField) qtyField.value = reqData.qty ?? '';
         setModalFieldValue(modal, 'priority', normalizePriorityLabel(reqData.priority));
       } else {
         setModalFieldValue(modal, 'reqRef', '');
@@ -463,6 +455,9 @@
       setTimeout(() => {
         // wait for supplier options/catalog to be ready before recomputing totals
         refreshPoSupplierOptions(modal).then(() => {
+          // Defect -> PO: auto-fill supplier, category, item and quantity from
+          // the defect's part (resolved against the loaded supplier catalog).
+          if(reqData && reqData.defect){ autofillPoFromDefect(modal, reqData); }
           recomputePoTotals(modal);
         });
       }, 60);
@@ -531,6 +526,40 @@
     openAddModal('po', reqData);
   }
 
+  // Defect -> PO ("Return to Supplier"). Opens the PO modal flagged as a defect
+  // conversion so autofillPoFromDefect() can pre-select supplier/category/item.
+  function convertDefectToPO(part, qty){
+    openAddModal('po', { defect: true, part: part || '', qty: qty || 1 });
+  }
+
+  // Find which loaded supplier sells `part`, then drive the PO modal's
+  // supplier -> category -> item cascade and set the quantity.
+  function autofillPoFromDefect(modal, reqData){
+    const part = String(reqData.part || '').trim().toLowerCase();
+    if(!part) return;
+    const catalog = window.SUPPLIER_CATALOG || {};
+    let match = null;
+    for(const supplierName of Object.keys(catalog)){
+      const product = (catalog[supplierName].products || []).find(p => String(p.name || '').trim().toLowerCase() === part);
+      if(product){ match = { supplier: supplierName, category: (product.category || '').trim() || 'Uncategorized', name: product.name }; break; }
+    }
+    if(!match) return;
+
+    const supplierField = modal.querySelector('#add-po-form [name="supplier"]');
+    if(supplierField){ supplierField.value = match.supplier; }
+    refreshAllPoItemRowsForSupplier(modal);
+
+    const row = modal.querySelector('#po-items-rows .po-item-row');
+    if(!row) return;
+    const catField = row.querySelector('.po-item-category');
+    const itemField = row.querySelector('.po-item-name');
+    const qtyField = row.querySelector('.po-item-qty');
+    if(catField){ catField.value = match.category; catField.dispatchEvent(new Event('change', { bubbles: true })); }
+    if(itemField){ itemField.value = match.name; itemField.dispatchEvent(new Event('change', { bubbles: true })); }
+    if(qtyField){ qtyField.value = reqData.qty ?? 1; qtyField.dispatchEvent(new Event('input', { bubbles: true })); }
+    recomputePoTotals(modal);
+  }
+
   let cancelPOData = null;
   function createPOFromView(){
     const modal = document.getElementById('view-modal');
@@ -569,6 +598,7 @@
           <div class="product-chip product-chip-edit">
             <input type="text" class="product-chip-name" value="${htmlEscape(item.name || '')}" placeholder="Product name" oninput="updateSupplierProduct(${idx}, 'name', this.value)">
             <input type="text" class="product-chip-category-input" value="${htmlEscape(item.category || '')}" placeholder="Category" oninput="updateSupplierProduct(${idx}, 'category', this.value)">
+            <input type="text" class="product-chip-category-input" value="${htmlEscape(item.brand || '')}" placeholder="Brand" oninput="updateSupplierProduct(${idx}, 'brand', this.value)">
             <span class="product-chip-sku">${htmlEscape(item.sku || 'SKU pending')}</span>
             <span class="product-chip-price">₱<input type="number" min="0" step="0.01" class="product-chip-price-input" value="${Number(item.price || 0)}" placeholder="0.00" oninput="updateSupplierProduct(${idx}, 'price', this.value)"></span>
             <button type="button" class="remove" onclick="removeSupplierProduct(${idx})" title="Remove">×</button>
@@ -661,10 +691,11 @@
     const d = Object.fromEntries(new FormData(form).entries());
     const name = (d.productName || '').trim();
     const category = (d.productCategory || '').trim();
+    const brand = (d.productBrand || '').trim();
     const price = Number(d.productPrice || 0);
     if(!name){ return; }
     const sku = (d.productSku || '').trim() || generateSupplierProductSku(name);
-    supplierProductDraft.push({ name, category, sku, price });
+    supplierProductDraft.push({ name, category, brand, sku, price });
     supplierProductCounter += 1;
     renderSupplierProductList();
     form.reset();
@@ -813,6 +844,9 @@
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target).entries());
     const products = Array.isArray(JSON.parse(d.productsJson || '[]')) ? JSON.parse(d.productsJson || '[]') : [];
+    // Brand now lives on each product; the supplier's brand column keeps the
+    // distinct product brands joined for the existing "Spend by Category" fallback.
+    const supplierBrand = [...new Set(products.map(p => (p.brand || '').trim()).filter(Boolean))].join(', ');
 
     fetch(procurementUrl('suppliers'), {
       method: 'POST',
@@ -824,7 +858,7 @@
         email: d.email || '',
         phone: d.phone || '',
         address: d.address || '',
-        brand: d.brand || '',
+        brand: supplierBrand,
         status: d.status || 'active',
         warehouse_id: d.warehouse_id || '',
         productsJson: JSON.stringify(products)
@@ -838,8 +872,8 @@
       if(table){
         const tr = document.createElement('tr');
         tr.dataset.sid = d.sid || '';
-        tr.dataset.category = d.brand || '';
-        tr.dataset.brand = d.brand || '';
+        tr.dataset.category = supplierBrand;
+        tr.dataset.brand = supplierBrand;
         tr.dataset.warehouseId = d.warehouse_id || '';
         tr.dataset.status = (d.status || 'active').replace(/^./, m => m.toUpperCase());
         tr.dataset.terms = 'Net 30';
@@ -850,7 +884,7 @@
         tr.dataset.products = JSON.stringify(products);
         tr.innerHTML = `
           <td><div class="supplier-pill-cell">${supplierPill(d.name)}</div></td>
-          <td>${htmlEscape(d.brand || '—')}</td>
+          <td>${htmlEscape(supplierBrand || '—')}</td>
           <td>${htmlEscape(d.contact || '—')}</td>
           <td>${htmlEscape(d.email || '—')}</td>
           <td>${htmlEscape(d.phone || '—')}</td>

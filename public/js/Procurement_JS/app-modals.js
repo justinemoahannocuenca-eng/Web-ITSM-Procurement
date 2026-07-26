@@ -40,7 +40,7 @@
   }
   function getTableType(row){
     const id = row?.closest('table')?.id;
-    return ({'po-table':'po','suppliers-table':'supplier','requisitions-table':'req','invoices-table':'invoice','deliveries-table':'delivery'})[id] || '';
+    return ({'po-table':'po','suppliers-table':'supplier','requisitions-table':'req','invoices-table':'invoice','deliveries-table':'delivery','defect-items-table':'defect'})[id] || '';
   }
   function resolveSupplierByPO(po){
     const found = [...document.querySelectorAll('#po-table tbody tr')].find(r => textFrom(r.children[0]) === po);
@@ -226,6 +226,11 @@
       // (JSON [{name?,qty}]); single-line requisitions fall back to item/qty.
       return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, items:getPoItems(row), priority:row.dataset.priority || textFrom(row.children[3]) || 'Normal', delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1', source: row.dataset.source || ''};
     }
+    if(type === 'defect'){
+      const part = row.dataset.part || textFrom(row.children[0]);
+      const qty = Number(row.dataset.qty || textFrom(row.children[1])) || 1;
+      return {type, key:part, title:`Defect · ${part}`, part, qty, description:row.dataset.description || textFrom(row.children[2]), status:textFrom(row.children[3]), source:textFrom(row.children[4]), reportedBy:textFrom(row.children[5]), date:textFrom(row.children[6])};
+    }
     if(type === 'invoice'){
       const inv = textFrom(row.children[0]);
       const po = textFrom(row.children[1]);
@@ -333,6 +338,20 @@
         setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null,
           !record.hasPO ? createPoBtn() : null);
       }
+    } else if(record.type === 'defect'){
+      body = `<div class="detail-grid"><div class="detail-card"><h4>Defect details</h4><div class="modal-row"><span>Part name</span><span>${htmlEscape(record.part)}</span></div><div class="modal-row"><span>Quantity</span><span>${record.qty}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div><div class="detail-card"><h4>Report info</h4><div class="modal-row"><span>Source</span><span>${htmlEscape(record.source)}</span></div><div class="modal-row"><span>Reported by</span><span>${htmlEscape(record.reportedBy)}</span></div><div class="modal-row"><span>Date</span><span>${htmlEscape(record.date)}</span></div></div></div><div class="detail-note"><b>Description</b><br>${htmlEscape(record.description)}</div>`;
+      // Two-step: "Return to Supplier" reveals "Create PO", which opens the PO
+      // modal auto-filled (supplier / category / item / quantity) from the part.
+      const showCreatePo = () => setViewActions(
+        {label:'Close', className:'btn-view', onClick:closeViewModal},
+        null,
+        {label:'Create PO', className:'btn-primary', onClick:()=>{ convertDefectToPO(record.part, record.qty); closeViewModal(); }}
+      );
+      const showReturn = () => setViewActions(
+        {label:'Close', className:'btn-view', onClick:closeViewModal},
+        {label:'Return to Supplier', className:'btn-approve', onClick: showCreatePo}
+      );
+      showReturn();
     } else if(record.type === 'invoice'){
       body = `<div class="detail-grid"><div class="detail-card"><h4>Invoice overview</h4><div class="modal-row"><span>Invoice no.</span><span>${htmlEscape(record.inv)}</span></div><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Invoice date</span><span>${htmlEscape(record.date)}</span></div></div><div class="detail-card"><h4>Payment details</h4><div class="modal-row"><span>Amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Due date</span><span>${htmlEscape(record.dueDate)}</span></div><div class="modal-row"><span>Payment method</span><span>${htmlEscape(record.method)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div></div><div class="detail-note"><b>Notes</b><br>${htmlEscape(record.notes)}</div>`;
       if(record.status !== 'Paid') setViewActions({label:'Flag issue', className:'btn-reject', onClick:()=>{ closeViewModal(); showToast(`${record.inv} flagged for review`, 'info'); }},{label:'Mark as paid', className:'btn-approve', onClick:()=>{ updateRowStatus(row,'Paid'); row.dataset.notes = 'Marked paid from view modal.'; closeViewModal(); showToast(`${record.inv} marked as paid`, 'ok'); }});

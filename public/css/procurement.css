@@ -387,6 +387,12 @@
   .status-pill.delivered{ background:var(--green-light); color:var(--green); }
   .status-pill.delayed{ background:var(--red-light); color:var(--red); }
   .status-pill.scheduled{ background:var(--purple-light); color:var(--purple); }
+  /* Defect item statuses */
+  .status-pill.open{ background:var(--orange-light); color:var(--orange); }
+  .status-pill.inreview{ background:var(--blue-light); color:var(--blue); }
+  .status-pill.resolved{ background:var(--green-light); color:var(--green); }
+  .status-pill.closed{ background:var(--gray-light); color:var(--muted); }
+  .status-pill.scrapped{ background:var(--red-light); color:var(--red); }
 
   .row-actions{ display:inline-flex; gap:14px; align-items:center; color:var(--muted); }
   .row-actions button{

@@ -160,29 +160,52 @@
             <h2>Defect Items</h2>
             <div class="search-box">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              <input placeholder="Search defect items...">
+              <input placeholder="Search defect items..." oninput="filterTable('defect-items-table', this.value)">
             </div>
           </div>
-          <table class="data-table" id="defect-items-table">
+          <table class="data-table sortable-table" id="defect-items-table">
             <thead>
               <tr>
-                <th>DEFECT #</th>
-                <th>ITEM</th>
-                <th>QTY</th>
-                <th>REASON</th>
+                <th class="sortable" data-key="part">PART NAME<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
+                <th class="sortable" data-key="qty">QTY<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
+                <th>DESCRIPTION</th>
+                <th class="sortable" data-key="status">STATUS<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
+                <th class="sortable" data-key="source">SOURCE<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
                 <th>REPORTED BY</th>
-                <th>STATUS</th>
-                <th>DATE</th>
+                <th class="sortable sort-desc" data-key="date">DATE<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
+                <th>ACTION</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colspan="7" style="text-align:center; padding:40px 16px; color:var(--text-muted);">
-                  Defect Items tracking is coming soon.
-                </td>
-              </tr>
+              @forelse(($defects ?? collect()) as $defect)
+                @php
+                  $defectStatus = $defect->status ?? 'Open';
+                  $defectStatusSlug = strtolower(str_replace(' ', '', $defectStatus));
+                  $defectSource = trim(($defect->source ?? '') . ($defect->source_id ? ' #' . $defect->source_id : '')) ?: '—';
+                @endphp
+                <tr data-status="{{ $defectStatusSlug }}" data-date="{{ $defect->created_at ?? '' }}" data-part="{{ $defect->part_name ?? '' }}" data-qty="{{ $defect->quantity ?? 1 }}" data-description="{{ $defect->description ?? '' }}">
+                  <td><b>{{ $defect->part_name ?? '—' }}</b></td>
+                  <td>{{ $defect->quantity ?? 0 }}</td>
+                  <td style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ $defect->description ?? '' }}">{{ $defect->description ?? '—' }}</td>
+                  <td><span class="status-pill {{ $defectStatusSlug }}">{{ ucfirst($defectStatus) }}</span></td>
+                  <td>{{ $defectSource }}</td>
+                  <td>{{ $defect->created_by ?? '—' }}</td>
+                  <td>{{ $defect->created_at ? \Carbon\Carbon::parse($defect->created_at)->format('M d, Y') : '—' }}</td>
+                  <td><span class="row-actions"><button title="View"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button></span></td>
+                </tr>
+              @empty
+                <tr>
+                  <td colspan="8" style="text-align:center; padding:40px 16px; color:var(--text-muted);">
+                    No defect items reported.
+                  </td>
+                </tr>
+              @endforelse
             </tbody>
           </table>
+          <div class="table-footer">
+            <div>Showing <b>{{ isset($defects) ? count($defects) : 0 }}</b> defect items</div>
+            <div class="pager"></div>
+          </div>
         </div>
       </div>{{-- /#req-tab-defects --}}
     </section>
