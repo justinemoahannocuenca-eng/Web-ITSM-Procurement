@@ -1,5 +1,4 @@
-
-  :root{
+:root{
     --navy: #0c1c3a;
     --navy-hover: #142a52;
     --navy-active: #1b3766;
@@ -936,6 +935,7 @@
   .dash-grid-3 .panel .donut-legend-dot.status-rejected{background:var(--red);}
   .dash-grid-3 .panel .donut-legend-dot.status-cancelled{background:var(--muted);}
   .dash-grid-3 .panel .donut-legend-dot.status-completed{background:var(--teal);}
+  .dash-grid-3 .panel .donut-legend-dot.status-delivered{background:var(--info);}
   .dash-grid-3 .panel .donut-legend-label{
     flex:1;
     color:var(--text);

@@ -1,4 +1,4 @@
-  /* ---------- Tabs (filter queue) ---------- */
+/* ---------- Tabs (filter queue) ---------- */
   function setActiveFilter(filter){
     document.querySelectorAll('#approval-tabs .tab').forEach(t=>{
       t.classList.toggle('active', t.dataset.filter === filter);
@@ -204,7 +204,8 @@
     approved: '#1fa971',
     rejected: '#eb5757',
     cancelled: '#7c88a3',
-    completed: '#14b8a6'
+    completed: '#14b8a6',
+    delivered: '#0ea5e9'
   };
 
   function initDonutFromData(canvas, statusData){
@@ -361,4 +362,3 @@
   function closeSpendByCategoryModal(){
     document.getElementById('spend-by-category-modal')?.classList.remove('open');
   }
-
