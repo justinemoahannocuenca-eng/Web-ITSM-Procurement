@@ -1,4 +1,4 @@
-  /* ---------- Record modals (view / edit / delete) ---------- */
+/* ---------- Record modals (view / edit / delete) ---------- */
   const PO_ITEM_HINTS = {
     'Cables & Misc':'Cable kits and accessory bundle',
     'Storage':'SSD and NAS storage units',
@@ -188,6 +188,32 @@
     return [...document.querySelectorAll('#requisitions-table tbody tr')].find(row => textFrom(row.children[0]) === ref || row.dataset.reqRef === ref || row.dataset.po === ref);
   }
 
+  // Defect Items status lifecycle, driven by the linked PO/shipment:
+  // Pending (defect reported) -> Processing (PO created from it) ->
+  // Intransit (delivery logged) -> Delivered (shipment delivered) ->
+  // Completed (shipment marked completed) / Cancelled (PO cancelled).
+  function findDefectRowsByPO(poNumber){
+    if(!poNumber) return [];
+    return [...document.querySelectorAll('#defect-items-table tbody tr')].filter(row => row.dataset.po === poNumber);
+  }
+  function updateDefectStatus(row, status){
+    if(!row) return;
+    row.dataset.status = String(status || '').toLowerCase().replace(/\s+/g,'-');
+    const cell = row.children[3];
+    if(cell) cell.innerHTML = statusPill(status);
+  }
+  // Any defect item not already in the new pipeline (e.g. the DB default
+  // "Open", or legacy Resolved/Closed/Scrapped labels) starts life as Pending.
+  const DEFECT_PIPELINE_STATUSES = ['pending','processing','intransit','delivered','completed','cancelled'];
+  function normalizeDefectStatuses(){
+    document.querySelectorAll('#defect-items-table tbody tr').forEach(row => {
+      const current = String(row.dataset.status || '').toLowerCase();
+      if(!DEFECT_PIPELINE_STATUSES.includes(current)){
+        updateDefectStatus(row, 'Pending');
+      }
+    });
+  }
+
   function updateRequisitionStatus(ref, status){
     const reqRow = findReqRowByRef(ref);
     if(!reqRow) return;
@@ -345,7 +371,7 @@
       const showCreatePo = () => setViewActions(
         {label:'Close', className:'btn-view', onClick:closeViewModal},
         null,
-        {label:'Create PO', className:'btn-primary', onClick:()=>{ convertDefectToPO(record.part, record.qty); closeViewModal(); }}
+        {label:'Create PO', className:'btn-primary', onClick:()=>{ convertDefectToPO(record.part, record.qty, row); closeViewModal(); }}
       );
       const showReturn = () => setViewActions(
         {label:'Close', className:'btn-view', onClick:closeViewModal},
@@ -563,6 +589,9 @@
       row.children[4].innerHTML = statusPill(d.status);
       row.children[5].textContent = d.date;
       row.dataset.status = String(d.status || '').toLowerCase().replace(/\s+/g,'');
+      const defectStatusMap = { intransit:'Intransit', delivered:'Delivered' };
+      const defectStatus = defectStatusMap[String(d.status || '').toLowerCase().trim()];
+      if(defectStatus){ findDefectRowsByPO(row.dataset.po || '').forEach(r => updateDefectStatus(r, defectStatus)); }
       const delId = row.dataset.id;
       if(delId){
         fetch(procurementUrl(`deliveries/${delId}`), {

@@ -1,4 +1,4 @@
-  /* ---------- Add Modals (PO / Supplier / Req / Delivery / Invoice) ---------- */
+/* ---------- Add Modals (PO / Supplier / Req / Delivery / Invoice) ---------- */
   const ADD_MODAL_MAP = {
     po: 'add-po-modal',
     supplier: 'add-supplier-modal',
@@ -436,6 +436,7 @@
       // straight from this page doesn't inherit a leftover requisition
       // reference/priority from a previous conversion — form.reset() can't
       // clear these because their defaultValue gets mutated once assigned.
+      modal.__defectRow = (reqData && reqData.defect) ? (reqData.row || null) : null;
       if(reqData){
         setModalFieldValue(modal, 'reqRef', reqData.reqNum || '');
         // A requisition may carry several item lines. Generate one PO item row
@@ -528,8 +529,8 @@
 
   // Defect -> PO ("Return to Supplier"). Opens the PO modal flagged as a defect
   // conversion so autofillPoFromDefect() can pre-select supplier/category/item.
-  function convertDefectToPO(part, qty){
-    openAddModal('po', { defect: true, part: part || '', qty: qty || 1 });
+  function convertDefectToPO(part, qty, row){
+    openAddModal('po', { defect: true, part: part || '', qty: qty || 1, row: row || null });
   }
 
   // Find which loaded supplier sells `part`, then drive the PO modal's
@@ -729,6 +730,7 @@
       row.dataset.status = 'cancelled';
       row.classList.add('cancelled-row');
       row.cells[6].innerHTML = '<span class="status-pill cancelled">Cancelled</span>';
+      findDefectRowsByPO(cancelPOData.poNum || '').forEach(r => updateDefectStatus(r, 'Cancelled'));
       // Previously this only updated the DOM — the cancellation was never sent
       // to the server, so refreshing the page silently reverted the PO (and any
       // requisition derived from it) back to its old status.
@@ -820,6 +822,11 @@
       }
       NEXT_ID.po++;
       ID_COUNTS.po++;
+      if(modal.__defectRow){
+        modal.__defectRow.dataset.po = d.po;
+        updateDefectStatus(modal.__defectRow, 'Processing');
+        modal.__defectRow = null;
+      }
       if(d.reqRef){
         const reqRow = findReqRowByRef(d.reqRef);
         if(reqRow){
@@ -1031,6 +1038,9 @@
       if(poRow){
         poRow.dataset.status = 'processing';
         poRow.children[5].innerHTML = statusPill('Processing');
+      }
+      if(!isDelayed){
+        findDefectRowsByPO(d.po || '').forEach(r => updateDefectStatus(r, 'Intransit'));
       }
       const reqRow = findReqRowByRef(d.po);
       if(reqRow){
