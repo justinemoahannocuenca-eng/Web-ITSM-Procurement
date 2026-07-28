@@ -186,7 +186,14 @@ class RequisitionController extends Controller
             $this->ensureRequisitionTable($connection);
             $connectionRequisitions = $connection
                 ->table('requisitions')
-                ->select($this->getRequisitionSelectFields($connection))
+                ->select($this->getRequisitionSelectFields($connection));
+
+            if (! (config('nexora.root_admin_module_testing') && $request->user()?->role === 'root_admin')
+                && $this->requisitionHasColumn($connection, 'client_id')) {
+                $connectionRequisitions->where('client_id', (int) session('employee_client_id'));
+            }
+
+            $connectionRequisitions = $connectionRequisitions
                 ->orderBy('created_at', 'desc')
                 ->get();
 
@@ -205,20 +212,28 @@ class RequisitionController extends Controller
         $requisitions = $requisitions->sortByDesc('created_at')->values();
         $requisitionRefs = $requisitions->pluck('requisition_number')->filter()->all();
 
+        // Purchase orders are owned by Procurement, not Inventory or Order
+        // Fulfillment. Looking for them in an external requisition database
+        // meant fulfilled requests could never be recognized as closed.
         $purchaseOrders = collect();
-        foreach ($this->getRequisitionConnections() as $connection) {
-            try {
-                if ($connection->getSchemaBuilder()->hasTable('purchase_orders')) {
-                    $purchaseOrders = $connection
-                        ->table('purchase_orders')
-                        ->whereIn('requisition_reference', $requisitionRefs)
-                        ->get()
-                        ->keyBy('requisition_reference');
-                    break;
+        try {
+            $procurement = DB::connection('procurement');
+            if ($procurement->getSchemaBuilder()->hasTable('purchase_orders')) {
+                $purchaseOrderQuery = $procurement
+                    ->table('purchase_orders')
+                    ->whereIn('requisition_reference', $requisitionRefs);
+
+                if (! (config('nexora.root_admin_module_testing') && $request->user()?->role === 'root_admin')
+                    && $procurement->getSchemaBuilder()->hasColumn('purchase_orders', 'client_id')) {
+                    $purchaseOrderQuery->where('client_id', (int) session('employee_client_id'));
                 }
-            } catch (\Exception $e) {
-                // ignore broken or unavailable external DB connections
+
+                $purchaseOrders = $purchaseOrderQuery
+                    ->get()
+                    ->keyBy('requisition_reference');
             }
+        } catch (\Exception $e) {
+            // Leave the queue usable when the Procurement connection is unavailable.
         }
 
         $requisitions = $requisitions->map(function ($req) use ($purchaseOrders) {
@@ -258,6 +273,42 @@ class RequisitionController extends Controller
 
             return $req;
         });
+
+        // Resolve defect/adjustment details for replacement requisitions
+        $requisitions = $requisitions->map(function ($req) {
+            if (!str_contains($req->notes ?? '', '[defect_id:')) {
+                return $req;
+            }
+            preg_match('/\[defect_id:(\d+)\]/', $req->notes ?? '', $m);
+            $defectId = (int) ($m[1] ?? 0);
+            if ($defectId < 1) {
+                return $req;
+            }
+            $defect = DB::connection('inventory')
+                ->table('defects')
+                ->where('id', $defectId)
+                ->first();
+            if ($defect) {
+                $req->defect_info = $defect;
+                if ($defect->source === 'Adjustment' && !empty($defect->source_id)) {
+                    $req->adjustment_info = DB::connection('inventory')
+                        ->table('stock_adjustments')
+                        ->where('id', (int) $defect->source_id)
+                        ->first();
+                }
+            }
+            return $req;
+        });
+
+        // The table is an active-work queue. Terminal requests remain in the
+        // source audit trail, but must not return as fresh Procurement work.
+        $requisitions = $requisitions->reject(function ($req) {
+            $status = strtolower(trim((string) ($req->status ?? 'pending')));
+            $poStatus = strtolower(trim((string) ($req->po_status ?? '')));
+
+            return in_array($status, ['delivered', 'completed', 'rejected', 'cancelled'], true)
+                || in_array($poStatus, ['delivered', 'completed', 'rejected', 'cancelled'], true);
+        })->values();
 
         $statusCounts = $requisitions->map(function ($req) {
             return strtolower(str_replace(' ', '', $req->status ?? 'Pending'));
