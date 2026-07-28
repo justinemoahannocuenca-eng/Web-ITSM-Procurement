@@ -50,6 +50,54 @@ class PurchaseOrderController extends Controller
     }
 
     /**
+     * Repair POs created before Inventory receiving cascaded delivery status
+     * back to the parent order. This is also defensive against a successful
+     * delivery write whose final PO update was interrupted.
+     */
+    private function reconcileReceivedPurchaseOrders($purchaseOrders): void
+    {
+        $purchaseOrderIds = $purchaseOrders->pluck('id')->filter()->values()->all();
+        if ($purchaseOrderIds === []) {
+            return;
+        }
+
+        $deliveriesByPurchaseOrder = DB::connection('procurement')
+            ->table('deliveries')
+            ->whereIn('purchase_order_id', $purchaseOrderIds)
+            ->get(['purchase_order_id', 'status'])
+            ->groupBy('purchase_order_id');
+
+        foreach ($purchaseOrders as $purchaseOrder) {
+            $statuses = $deliveriesByPurchaseOrder->get($purchaseOrder->id, collect())
+                ->pluck('status')
+                ->map(fn ($status) => strtolower(trim((string) $status)))
+                ->filter()
+                ->values();
+
+            if ($statuses->isEmpty()
+                || $statuses->contains(fn ($status) => ! in_array($status, ['delivered', 'completed', 'cancelled'], true))
+                || ! $statuses->contains(fn ($status) => in_array($status, ['delivered', 'completed'], true))) {
+                continue;
+            }
+
+            $targetStatus = $statuses->every(fn ($status) => in_array($status, ['completed', 'cancelled'], true))
+                ? 'completed'
+                : 'delivered';
+
+            if (strtolower((string) $purchaseOrder->status) === $targetStatus) {
+                continue;
+            }
+
+            DB::connection('procurement')->table('purchase_orders')
+                ->where('id', $purchaseOrder->id)
+                ->whereIn('status', ['approved', 'processing'])
+                ->update(['status' => $targetStatus, 'updated_at' => now()]);
+
+            $purchaseOrder->status = $targetStatus;
+        }
+    }
+
+    /**
      * Detect a unique-constraint violation (e.g. a duplicate po_number),
      * regardless of which database driver raised it.
      */
@@ -127,6 +175,8 @@ class PurchaseOrderController extends Controller
             ->select('purchase_orders.*', 'suppliers.name as supplier_name')
             ->orderBy('purchase_orders.created_at', 'desc')
             ->get();
+
+        $this->reconcileReceivedPurchaseOrders($purchaseOrders);
 
         // Item breakdown per PO (name/qty/price), used for the View modal's
         // item chips — same "products as chips" pattern used on Suppliers.
@@ -212,6 +262,22 @@ class PurchaseOrderController extends Controller
         $requisitionReference = $validated['reqRef'] ?? null;
         $statusWriter = new RequisitionStatusWriter;
         if (! empty($requisitionReference)) {
+            $existingPurchaseOrder = $this->table('purchase_orders')
+                ->where('requisition_reference', $requisitionReference)
+                ->first(['po_number']);
+
+            if ($existingPurchaseOrder) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => sprintf(
+                        'Requisition %s is already linked to purchase order %s.',
+                        $requisitionReference,
+                        $existingPurchaseOrder->po_number
+                    ),
+                    'po_number' => $existingPurchaseOrder->po_number,
+                ], 409);
+            }
+
             $requisitionStatus = $statusWriter->statusOfReference($requisitionReference);
             if ($requisitionStatus !== null && strcasecmp($requisitionStatus, RequisitionStatusWriter::APPROVED) !== 0) {
                 throw ValidationException::withMessages([

@@ -1,5 +1,4 @@
-
-  /* ---------- Page switching ---------- */
+/* ---------- Page switching ---------- */
   const ALL_PAGES = ['dashboard','purchase-orders','suppliers','requisitions','invoices','deliveries','approvals','reports'];
   function toggleNotifPanel(e){
     e?.stopPropagation();
@@ -10,71 +9,145 @@
     if(willOpen){ loadNotifications(panel); }
   }
 
+  /* ---------- Authoritative requisition counts ----------
+     The sidebar badge and the Dashboard "REQUISITIONS" card were each fed by
+     their own server number (one blank on the Requisitions page itself, one
+     counting rows across ALL clients on Dashboard), so they never agreed with
+     what the Requisitions page table actually shows. The Requisitions page's
+     own status chart is the one number that is always correctly scoped, so
+     every other page now borrows it instead of trusting its own count. */
+  const REQ_STATS_CACHE_KEY = 'nexora_req_stats_v1';
+  const REQ_STATS_MAX_AGE_MS = 5 * 60 * 1000;
+
+  function readReqStatsFromChart(root){
+    const chart = root.getElementById ? root.getElementById('requisition-status-chart') : null;
+    if(!chart) return null;
+    let total = 0, pending = 0;
+    chart.querySelectorAll('.status-chart-item').forEach(item => {
+      const val = parseInt((item.querySelector('.status-count')?.textContent || '0').trim(), 10) || 0;
+      total += val;
+      if(item.dataset.status === 'pending') pending = val;
+    });
+    return { total, pending };
+  }
+  function cacheReqStats(stats){
+    try{ sessionStorage.setItem(REQ_STATS_CACHE_KEY, JSON.stringify({ ...stats, ts: Date.now() })); }catch(e){}
+  }
+  function readCachedReqStats(){
+    try{
+      const raw = sessionStorage.getItem(REQ_STATS_CACHE_KEY);
+      if(!raw) return null;
+      const parsed = JSON.parse(raw);
+      if(Date.now() - parsed.ts > REQ_STATS_MAX_AGE_MS) return null;
+      return parsed;
+    }catch(e){ return null; }
+  }
+  async function fetchReqDoc(){
+    const res = await fetch(procurementUrl('requisitions'), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const html = await res.text();
+    return new DOMParser().parseFromString(html, 'text/html');
+  }
+  async function getAuthoritativeReqStats(){
+    const live = readReqStatsFromChart(document);
+    if(live){ cacheReqStats(live); return live; }
+    const cached = readCachedReqStats();
+    if(cached) return cached;
+    try{
+      const remote = readReqStatsFromChart(await fetchReqDoc());
+      if(remote) cacheReqStats(remote);
+      return remote;
+    }catch(e){ return null; }
+  }
+  function applyReqStats(stats){
+    if(!stats) return;
+    setLiveStat('dash-stat-req', stats.total);
+    const reqBadge = document.querySelector("a[href*='requisitions'] .nav-badge");
+    if(reqBadge){
+      if(reqBadge.textContent.trim() !== String(stats.pending)){
+        reqBadge.textContent = stats.pending;
+        reqBadge.classList.remove('badge-pulse'); void reqBadge.offsetWidth; reqBadge.classList.add('badge-pulse');
+      }
+      reqBadge.classList.toggle('red', stats.pending > 0);
+    }
+  }
+
+  function rowsFromTable(root, tableId, mapFn){
+    const table = root.getElementById ? root.getElementById(tableId) : null;
+    if(!table) return [];
+    return Array.from(table.querySelectorAll('tbody tr[data-id]')).map(mapFn);
+  }
+  const mapReqRow = tr => ({
+    ref: tr.querySelector('td a')?.textContent.trim() || '',
+    item: tr.children[1]?.textContent.trim() || '',
+    qty: tr.children[2]?.textContent.trim() || '',
+    department: tr.children[4]?.textContent.trim() || '',
+    requester: tr.children[5]?.textContent.trim() || '',
+    status: tr.dataset.status || 'pending',
+  });
+  const mapDelRow = tr => ({
+    ref: tr.dataset.ship || tr.children[0]?.textContent.trim() || '',
+    item: (tr.dataset.items || tr.children[3]?.textContent.trim() || '').split(',')[0].trim(),
+    status: tr.dataset.status || '',
+  });
+  async function getRequisitionRows(){
+    if(document.getElementById('requisitions-table')) return rowsFromTable(document, 'requisitions-table', mapReqRow);
+    try{ return rowsFromTable(await fetchReqDoc(), 'requisitions-table', mapReqRow); }catch(e){ return []; }
+  }
+  async function getDeliveryRows(){
+    if(document.getElementById('deliveries-table')) return rowsFromTable(document, 'deliveries-table', mapDelRow);
+    try{
+      const res = await fetch(procurementUrl('deliveries'), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      return rowsFromTable(doc, 'deliveries-table', mapDelRow);
+    }catch(e){ return []; }
+  }
+
   async function loadNotifications(panel){
     if(!panel) return;
     // No "Loading…" placeholder — the panel keeps its current content until the
     // fresh list is ready, so opening it never flashes a loading state.
     try{
-      const headers = { 'X-Requested-With': 'XMLHttpRequest' };
-      // Fetch recent requisitions
-      const [reqRes, delRes] = await Promise.all([
-        fetch(procurementUrl('requisitions'), { headers }),
-        fetch(procurementUrl('deliveries'), { headers })
+      const [reqStats, reqRows, delRows] = await Promise.all([
+        getAuthoritativeReqStats(),
+        getRequisitionRows(),
+        getDeliveryRows()
       ]);
-      const reqJson = await safeJson(reqRes);
-      const delJson = await safeJson(delRes);
-      const reqs = Array.isArray(reqJson)
-        ? reqJson
-        : (reqJson && Array.isArray(reqJson.data) ? reqJson.data : []);
-      const dels = Array.isArray(delJson)
-        ? delJson
-        : (delJson && Array.isArray(delJson.data) ? delJson.data : []);
 
-      // Build items
+      const pendingReqs = reqRows.filter(r => (r.status || 'pending') === 'pending');
+      const activeDels = delRows.filter(r => ['pending','scheduled','intransit','shipment'].includes(r.status || ''));
+
       const items = [];
-      // Prioritize pending requisitions
-      (reqs || []).slice(0,5).forEach(r => {
-        items.push({ type: 'req', title: r.rq || r.ref || r.id || 'Requisition', text: `${r.item || ''} · Qty ${r.qty || r.quantity || ''}`, meta: r.requester || r.dept || '' });
+      pendingReqs.slice(0,5).forEach(r => {
+        items.push({ type: 'req', title: r.ref || 'Requisition', text: `${r.item || ''} · Qty ${r.qty || ''}`, meta: r.requester || r.department || '' });
       });
-      // Add deliveries with relevant statuses
-      (dels || []).slice(0,5).forEach(d => {
-        items.push({ type: 'del', title: d.dr || d.id || d.ref || 'Delivery', text: `${d.items || d.items || ''} · Qty ${d.qty || ''}`, meta: d.status || '' });
+      activeDels.slice(0,5).forEach(d => {
+        items.push({ type: 'del', title: d.ref || 'Delivery', text: `${d.item || ''}`, meta: d.status || '' });
       });
 
       if(items.length === 0){
         panel.innerHTML = `<div class="notif-item ok"><span class="notif-icon">✓</span><div class="notif-content"><strong>No alerts</strong>You have no new notifications right now.<small>System · live</small></div></div>`;
-        updateNavCounts(0,0);
-        return;
+      } else {
+        panel.innerHTML = '';
+        items.forEach(it => {
+          const div = document.createElement('div');
+          div.className = 'notif-item ' + (it.type === 'req' ? 'warn' : 'ok');
+          div.innerHTML = `<span class="notif-icon">${it.type==='req' ? 'R' : 'D'}</span><div class="notif-content"><strong>${escapeHtml(it.title)}</strong><div>${escapeHtml(it.text)}</div><small>${escapeHtml(it.meta)}</small></div>`;
+          panel.appendChild(div);
+        });
       }
-
-      panel.innerHTML = '';
-      let reqCount = 0, delCount = 0;
-      items.forEach(it => {
-        const div = document.createElement('div');
-        div.className = 'notif-item ' + (it.type === 'req' ? 'warn' : 'ok');
-        div.innerHTML = `<span class="notif-icon">${it.type==='req' ? 'R' : 'D'}</span><div class="notif-content"><strong>${escapeHtml(it.title)}</strong><div>${escapeHtml(it.text)}</div><small>${escapeHtml(it.meta)}</small></div>`;
-        panel.appendChild(div);
-        if(it.type === 'req') reqCount++; else if(it.type === 'del') delCount++;
-      });
-      updateNavCounts(reqCount, delCount);
+      // Never re-derive the requisitions badge from this panel's own item
+      // count — reqStats (the status chart) is the correct source; only the
+      // deliveries badge comes from what we counted here.
+      applyReqStats(reqStats);
+      const delBadge = document.querySelector("a[href*='deliveries'] .nav-badge");
+      if(delBadge){ delBadge.textContent = activeDels.length; delBadge.classList.toggle('red', activeDels.length>0); }
     }catch(err){
       panel.innerHTML = `<div style="padding:12px;color:#c34">Unable to load notifications</div>`;
       console.error('loadNotifications', err);
     }
   }
 
-  async function safeJson(res){
-    try{ return await res.json(); }catch(e){ return null; }
-  }
-
   function escapeHtml(s){ return (s||'').toString().replace(/[&<>"]+/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]||c)); }
-
-  function updateNavCounts(reqCount, delCount){
-    const reqBadge = document.querySelector("a[href*='requisitions'] .nav-badge");
-    const delBadge = document.querySelector("a[href*='deliveries'] .nav-badge");
-    if(reqBadge){ reqBadge.textContent = reqCount; reqBadge.classList.toggle('red', reqCount>0); }
-    if(delBadge){ delBadge.textContent = delCount; delBadge.classList.toggle('red', delCount>0); }
-  }
 
   document.addEventListener('click', (e)=>{
     const panel = document.getElementById('notif-panel');
@@ -104,21 +177,25 @@
   async function pollLiveStats(){
     try{
       const res = await fetch(procurementUrl('live-stats'), { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } });
-      if(!res.ok) return;
-      const j = await res.json();
-      if(!j) return;
-      if(j.cards){
-        setLiveStat('dash-stat-po',  j.cards.activePos);
-        setLiveStat('dash-stat-sup', j.cards.suppliers);
-        setLiveStat('dash-stat-req', j.cards.requisitions);
-        setLiveStat('dash-stat-inv', j.cards.deliveries);
-      }
-      if(j.badges){
-        setLiveBadge("a[href*='purchase-orders'] .nav-badge", j.badges.purchaseOrders);
-        setLiveBadge("a[href*='requisitions'] .nav-badge", j.badges.requisitions);
-        setLiveBadge("a[href*='deliveries'] .nav-badge", j.badges.deliveries);
+      if(res.ok){
+        const j = await res.json();
+        if(j){
+          if(j.cards){
+            setLiveStat('dash-stat-po',  j.cards.activePos);
+            setLiveStat('dash-stat-sup', j.cards.suppliers);
+            setLiveStat('dash-stat-inv', j.cards.deliveries);
+          }
+          if(j.badges){
+            setLiveBadge("a[href*='purchase-orders'] .nav-badge", j.badges.purchaseOrders);
+            setLiveBadge("a[href*='deliveries'] .nav-badge", j.badges.deliveries);
+          }
+        }
       }
     }catch(err){ /* keep last known values */ }
+    // Requisitions total/pending never come from live-stats — that endpoint
+    // isn't scoped the same way the Requisitions page is — always recompute
+    // from the authoritative source instead.
+    applyReqStats(await getAuthoritativeReqStats());
   }
   window.pollLiveStats = pollLiveStats;
   document.addEventListener('DOMContentLoaded', ()=>{

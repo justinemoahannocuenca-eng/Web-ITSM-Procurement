@@ -1,4 +1,4 @@
-/* ---------- Delivery tracking modal ---------- */
+  /* ---------- Delivery tracking modal ---------- */
   function openTrackModal(btn){
     const row = btn.closest('tr');
     const d = row.dataset;
@@ -67,7 +67,6 @@
       row.dataset.stage = '4';
       row.children[5].innerHTML = statusPill('Completed');
       persistShipmentStatus(row, 'completed', 'Completed', 'Completed');
-      findDefectRowsByPO(row.dataset.po || '').forEach(r => updateDefectStatus(r, 'Completed'));
       showToast(`${row.dataset.ship} marked as completed`, 'ok');
     }
     closeTrackModal();

@@ -1,6 +1,5 @@
-/* ---------- Init ---------- */
+  /* ---------- Init ---------- */
   if(typeof initRowActionButtons === 'function') initRowActionButtons();
-  if(typeof normalizeDefectStatuses === 'function') normalizeDefectStatuses();
   if(typeof refreshTabCounts === 'function') refreshTabCounts();
   // initDonut() targets the Approvals page's SVG donut (#donut-center-val etc.)
   // — only call it there, otherwise it throws on the missing IDs and aborts

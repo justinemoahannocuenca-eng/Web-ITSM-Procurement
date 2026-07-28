@@ -28,7 +28,7 @@ class MarkDelayedDeliveries extends Command
         // Previously this was only ever set once, at the moment a delivery
         // was logged — if the expected date passed while it was still
         // "intransit", nothing ever flipped it to "Delayed" automatically.
-        $updated = DB::table('deliveries')
+        $updated = DB::connection('procurement')->table('deliveries')
             ->whereIn('status', ['pending', 'scheduled', 'intransit'])
             ->whereNotNull('estimated_arrival')
             ->whereDate('estimated_arrival', '<', now()->toDateString())

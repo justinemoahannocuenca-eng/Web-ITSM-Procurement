@@ -41,7 +41,7 @@ class CheckLowStock extends Command
         $count = 0;
         foreach ($rows as $r) {
             $count++;
-            DB::table('low_stock_alerts')->updateOrInsert(
+            DB::connection('procurement')->table('low_stock_alerts')->updateOrInsert(
                 ['external_item_id' => $r->stock_level_id, 'warehouse_id' => $r->warehouse_id],
                 ['sku' => $r->sku, 'item_name' => $r->item_name, 'stock' => $r->stock, 'threshold' => $threshold, 'updated_at' => now()]
             );

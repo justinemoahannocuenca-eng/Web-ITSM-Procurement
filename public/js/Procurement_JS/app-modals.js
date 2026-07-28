@@ -188,10 +188,66 @@
     return [...document.querySelectorAll('#requisitions-table tbody tr')].find(row => textFrom(row.children[0]) === ref || row.dataset.reqRef === ref || row.dataset.po === ref);
   }
 
-  // Defect Items status lifecycle, driven by the linked PO/shipment:
-  // Pending (defect reported) -> Processing (PO created from it) ->
-  // Intransit (delivery logged) -> Delivered (shipment delivered) ->
-  // Completed (shipment marked completed) / Cancelled (PO cancelled).
+  function findSupplierForItem(itemName){
+    const key = String(itemName || '').trim().toLowerCase();
+    if(!key) return null;
+    const rows = [...document.querySelectorAll('#suppliers-table tbody tr')];
+    for(const row of rows){
+      const products = getSupplierProducts(row);
+      const match = products.find(p => String(p.name || '').trim().toLowerCase() === key);
+      if(match){
+        return {
+          name: supplierNameFromCell(row.children[0]) || textFrom(row.children[0]),
+          category: match.category || row.dataset.category || row.dataset.brand || 'General Procurement'
+        };
+      }
+    }
+    return null;
+  }
+
+  // Matches a requested item name against every supplier's product catalog to
+  // find which supplier sells it, along with its category and unit price.
+  // Used by the Request -> PO modal to auto-fill Supplier/Category/Unit Price
+  // without any manual selection.
+  function matchSupplierProductForItem(itemName){
+    const key = String(itemName || '').trim().toLowerCase();
+    if(!key) return null;
+    const rows = [...document.querySelectorAll('#suppliers-table tbody tr')];
+    for(const row of rows){
+      const products = getSupplierProducts(row);
+      const match = products.find(p => String(p.name || '').trim().toLowerCase() === key);
+      if(match){
+        return {
+          supplierName: supplierNameFromCell(row.children[0]) || textFrom(row.children[0]),
+          category: match.category || row.dataset.category || row.dataset.brand || 'General Procurement',
+          unitPrice: Number(match.price || match.unitPrice || 0),
+          productName: match.name || itemName
+        };
+      }
+    }
+    // Fallback to the client-side supplier catalog cache (populated by
+    // refreshPoSupplierOptions), used when the Suppliers page rows aren't in
+    // the DOM (e.g. opening the PO modal from another page).
+    const catalog = window.SUPPLIER_CATALOG || {};
+    for(const supplierName of Object.keys(catalog)){
+      const products = catalog[supplierName].products || [];
+      const match = products.find(p => String(p.name || '').trim().toLowerCase() === key);
+      if(match){
+        return {
+          supplierName,
+          category: match.category || 'General Procurement',
+          unitPrice: Number(match.unitPrice || match.price || 0),
+          productName: match.name || itemName
+        };
+      }
+    }
+    return null;
+  }
+
+  // Kept for the unrelated Requisition -> Purchase Order conversion flow
+  // (app-forms.js / app-deliveries.js still call these when a PO tied to a
+  // defect-linked row changes stage). No-ops for the real defect rows below
+  // since those never carry a data-po attribute.
   function findDefectRowsByPO(poNumber){
     if(!poNumber) return [];
     return [...document.querySelectorAll('#defect-items-table tbody tr')].filter(row => row.dataset.po === poNumber);
@@ -199,19 +255,92 @@
   function updateDefectStatus(row, status){
     if(!row) return;
     row.dataset.status = String(status || '').toLowerCase().replace(/\s+/g,'-');
-    const cell = row.children[3];
+    const cell = row.children[5] || row.children[3];
     if(cell) cell.innerHTML = statusPill(status);
   }
-  // Any defect item not already in the new pipeline (e.g. the DB default
-  // "Open", or legacy Resolved/Closed/Scrapped labels) starts life as Pending.
-  const DEFECT_PIPELINE_STATUSES = ['pending','processing','intransit','delivered','completed','cancelled'];
-  function normalizeDefectStatuses(){
-    document.querySelectorAll('#defect-items-table tbody tr').forEach(row => {
-      const current = String(row.dataset.status || '').toLowerCase();
-      if(!DEFECT_PIPELINE_STATUSES.includes(current)){
-        updateDefectStatus(row, 'Pending');
-      }
-    });
+
+  // Defect Items table — static return workflow (no supplier portal, no PO).
+  // Procurement only flips the defect's status; Inventory owns detection
+  // (creating the defect) and final processing (marking it Completed).
+  //
+  //   Open -> Rejected
+  //   Open -> Returned to Supplier
+  //   Returned to Supplier -> Replacement In Transit
+  //   Replacement In Transit -> Replacement Received
+  //       (server creates the Inventory stock_receivings row)
+  //
+  // The table has no server-rendered rows — it's populated entirely from
+  // GET /procurement/requisitions/defects.
+  function defectRowMarkup(d){
+    const dateStr = d.date ? new Date(d.date).toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'}) : '—';
+    return `
+      <td><b>${htmlEscape(d.defect_no)}</b></td>
+      <td>${htmlEscape(d.part_name)}</td>
+      <td>${Number(d.quantity || 0)}</td>
+      <td>${htmlEscape(d.description || '—')}</td>
+      <td>${htmlEscape(d.reported_by || '—')}</td>
+      <td>${statusPill(d.status)}</td>
+      <td>${htmlEscape(dateStr)}</td>
+      <td><span class="row-actions"><button title="View" onclick="openViewModal(this)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button></span></td>
+    `;
+  }
+  function loadDefectItems(){
+    const table = document.getElementById('defect-items-table');
+    if(!table) return;
+    fetch(procurementUrl('requisitions/defects'), { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } })
+      .then(r => r.json())
+      .then(items => {
+        const tbody = table.querySelector('tbody');
+        if(!tbody) return;
+        if(!Array.isArray(items) || items.length === 0){
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px 16px; color:var(--text-muted);">No defect items reported yet.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = '';
+        items.forEach(d => {
+          const row = document.createElement('tr');
+          row.dataset.id = d.id;
+          row.dataset.defectNo = d.defect_no;
+          row.dataset.part = d.part_name;
+          row.dataset.qty = d.quantity;
+          row.dataset.description = d.description || '';
+          row.dataset.source = d.source || '';
+          row.dataset.status = String(d.status || 'Open').toLowerCase().replace(/\s+/g,'');
+          row.innerHTML = defectRowMarkup(d);
+          tbody.appendChild(row);
+        });
+      })
+      .catch(() => showToast('Unable to load defect items from server.', 'no'));
+  }
+  // Sends one of the static return actions to the server and refreshes the
+  // row + open modal (if any) with the resulting status.
+  function defectAction(row, action){
+    if(!row) return;
+    const id = row.dataset.id;
+    if(!id) return;
+    fetch(procurementUrl(`requisitions/defects/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+      body: new URLSearchParams({ action }).toString()
+    })
+      .then(async r => {
+        const payload = await r.json().catch(() => null);
+        if(!r.ok) throw new Error(payload?.message || `Defect update failed (${r.status})`);
+        return payload;
+      })
+      .then(payload => {
+        const status = payload.defect_status;
+        row.dataset.status = String(status || '').toLowerCase().replace(/\s+/g,'');
+        if(row.children[5]) row.children[5].innerHTML = statusPill(status);
+        closeViewModal();
+        showToast(
+          payload.receiving_created
+            ? `${row.dataset.defectNo} marked Replacement Received — receiving record created for Inventory.`
+            : `${row.dataset.defectNo} updated to ${status}.`,
+          'ok'
+        );
+      })
+      .catch(err => showToast(err?.message || 'Unable to update this defect item.', 'no'));
   }
 
   function updateRequisitionStatus(ref, status){
@@ -253,9 +382,9 @@
       return {type, key:ref, title:`Requisition · ${ref}`, ref, item:textFrom(row.children[1]), qty:Number(textFrom(row.children[2])) || 0, items:getPoItems(row), priority:row.dataset.priority || textFrom(row.children[3]) || 'Normal', delivery:textFrom(row.children[3]), dept:textFrom(row.children[4]), requester:textFrom(row.children[5]), status:textFrom(row.children[6]), date:textFrom(row.children[7]), time:row.dataset.time || '10:30 AM', uom:row.dataset.uom || 'pcs', notes:row.dataset.notes || `Requested for ${textFrom(row.children[4])} operations.`, po:textFrom(row.dataset.po || ''), hasPO: row.dataset.hasPo === '1', source: row.dataset.source || ''};
     }
     if(type === 'defect'){
-      const part = row.dataset.part || textFrom(row.children[0]);
-      const qty = Number(row.dataset.qty || textFrom(row.children[1])) || 1;
-      return {type, key:part, title:`Defect · ${part}`, part, qty, description:row.dataset.description || textFrom(row.children[2]), status:textFrom(row.children[3]), source:textFrom(row.children[4]), reportedBy:textFrom(row.children[5]), date:textFrom(row.children[6])};
+      const part = row.dataset.part || textFrom(row.children[1]);
+      const qty = Number(row.dataset.qty || textFrom(row.children[2])) || 1;
+      return {type, key:part, id:row.dataset.id || '', title:`Defect · ${row.dataset.defectNo || part}`, defectNo:row.dataset.defectNo || '', part, qty, description:row.dataset.description || textFrom(row.children[3]), reportedBy:textFrom(row.children[4]), status:textFrom(row.children[5]), source:row.dataset.source || '—', date:textFrom(row.children[6])};
     }
     if(type === 'invoice'){
       const inv = textFrom(row.children[0]);
@@ -365,19 +494,33 @@
           !record.hasPO ? createPoBtn() : null);
       }
     } else if(record.type === 'defect'){
-      body = `<div class="detail-grid"><div class="detail-card"><h4>Defect details</h4><div class="modal-row"><span>Part name</span><span>${htmlEscape(record.part)}</span></div><div class="modal-row"><span>Quantity</span><span>${record.qty}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div><div class="detail-card"><h4>Report info</h4><div class="modal-row"><span>Source</span><span>${htmlEscape(record.source)}</span></div><div class="modal-row"><span>Reported by</span><span>${htmlEscape(record.reportedBy)}</span></div><div class="modal-row"><span>Date</span><span>${htmlEscape(record.date)}</span></div></div></div><div class="detail-note"><b>Description</b><br>${htmlEscape(record.description)}</div>`;
-      // Two-step: "Return to Supplier" reveals "Create PO", which opens the PO
-      // modal auto-filled (supplier / category / item / quantity) from the part.
-      const showCreatePo = () => setViewActions(
-        {label:'Close', className:'btn-view', onClick:closeViewModal},
-        null,
-        {label:'Create PO', className:'btn-primary', onClick:()=>{ convertDefectToPO(record.part, record.qty, row); closeViewModal(); }}
-      );
-      const showReturn = () => setViewActions(
-        {label:'Close', className:'btn-view', onClick:closeViewModal},
-        {label:'Return to Supplier', className:'btn-approve', onClick: showCreatePo}
-      );
-      showReturn();
+      body = `<div class="detail-grid"><div class="detail-card"><h4>Defect details</h4><div class="modal-row"><span>Defect #</span><span>${htmlEscape(record.defectNo)}</span></div><div class="modal-row"><span>Part name</span><span>${htmlEscape(record.part)}</span></div><div class="modal-row"><span>Quantity</span><span>${record.qty}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div><div class="detail-card"><h4>Report info</h4><div class="modal-row"><span>Source</span><span>${htmlEscape(record.source)}</span></div><div class="modal-row"><span>Reported by</span><span>${htmlEscape(record.reportedBy)}</span></div><div class="modal-row"><span>Date</span><span>${htmlEscape(record.date)}</span></div></div></div><div class="detail-note"><b>Description</b><br>${htmlEscape(record.description)}</div>`;
+      // Static return workflow — Procurement only updates status, it never
+      // talks to a supplier system or raises a PO for this:
+      //   Open -> Rejected / Returned to Supplier
+      //   Returned to Supplier -> Replacement In Transit
+      //   Replacement In Transit -> Replacement Received (Inventory takes it
+      //     from there and the defect becomes Completed on their side).
+      const defectStatus = String(record.status || 'Open').toLowerCase().trim();
+      if(defectStatus === 'open'){
+        setViewActions(
+          {label:'Reject', className:'btn-reject', onClick:()=> defectAction(row, 'reject')},
+          {label:'Return to Supplier', className:'btn-approve', onClick:()=> defectAction(row, 'return')}
+        );
+      } else if(defectStatus === 'returned to supplier'){
+        setViewActions(
+          {label:'Close', className:'btn-view', onClick:closeViewModal},
+          {label:'Mark In Transit', className:'btn-approve', onClick:()=> defectAction(row, 'intransit')}
+        );
+      } else if(defectStatus === 'replacement in transit'){
+        setViewActions(
+          {label:'Close', className:'btn-view', onClick:closeViewModal},
+          {label:'Mark Received', className:'btn-approve', onClick:()=> defectAction(row, 'received')}
+        );
+      } else {
+        // Replacement Received / Completed / Rejected are terminal here.
+        setViewActions({label:'Close', className:'btn-view', onClick:closeViewModal}, null);
+      }
     } else if(record.type === 'invoice'){
       body = `<div class="detail-grid"><div class="detail-card"><h4>Invoice overview</h4><div class="modal-row"><span>Invoice no.</span><span>${htmlEscape(record.inv)}</span></div><div class="modal-row"><span>PO number</span><span>${htmlEscape(record.po)}</span></div><div class="modal-row"><span>Supplier</span><span>${htmlEscape(record.supplier)}</span></div><div class="modal-row"><span>Invoice date</span><span>${htmlEscape(record.date)}</span></div></div><div class="detail-card"><h4>Payment details</h4><div class="modal-row"><span>Amount</span><span>${money(record.amount)}</span></div><div class="modal-row"><span>Due date</span><span>${htmlEscape(record.dueDate)}</span></div><div class="modal-row"><span>Payment method</span><span>${htmlEscape(record.method)}</span></div><div class="modal-row"><span>Status</span><span>${htmlEscape(record.status)}</span></div></div></div><div class="detail-note"><b>Notes</b><br>${htmlEscape(record.notes)}</div>`;
       if(record.status !== 'Paid') setViewActions({label:'Flag issue', className:'btn-reject', onClick:()=>{ closeViewModal(); showToast(`${record.inv} flagged for review`, 'info'); }},{label:'Mark as paid', className:'btn-approve', onClick:()=>{ updateRowStatus(row,'Paid'); row.dataset.notes = 'Marked paid from view modal.'; closeViewModal(); showToast(`${record.inv} marked as paid`, 'ok'); }});

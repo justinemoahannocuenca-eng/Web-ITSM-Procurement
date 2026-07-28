@@ -52,6 +52,14 @@
     if(field) field.value = value;
   }
 
+  // "Created By" must always reflect whoever is actually logged in — the
+  // topnav profile dropdown already renders that name server-side, so we
+  // read it from there instead of leaving the field hardcoded/editable.
+  function getCurrentEmployeeName(){
+    const el = document.querySelector('.profile-dropdown .profile-id strong');
+    return el ? el.textContent.trim() : '';
+  }
+
   function refreshPoSupplierOptions(modal){
     const form = modal?.querySelector('#add-po-form');
     if(!form) return Promise.resolve();
@@ -78,7 +86,7 @@
           products: s.products.map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0), category: p.category || '' }))
         };
       });
-      refreshAllPoItemRowsForSupplier(modal);
+      syncPoItemRowsWithSupplier(modal);
       refreshDeliverySupplierOptions();
       return Promise.resolve();
     }
@@ -93,7 +101,7 @@
         list.forEach(s => {
           window.SUPPLIER_CATALOG[s.name] = { brand: s.brand || s.name, warehouseId: s.warehouse_id || '', products: (s.products || []).map(p => ({ name: p.name, unitPrice: Number(p.price || p.unitPrice || 0), category: p.category || '' })) };
         });
-        refreshAllPoItemRowsForSupplier(modal);
+        syncPoItemRowsWithSupplier(modal);
         refreshDeliverySupplierOptions();
       }).catch(() => {
         // ignore errors; leave supplierField as-is
@@ -248,14 +256,178 @@
     }).filter(r => r.name && r.qty > 0);
   }
 
+  /* ---------- PO modal: fully-automated item rows (Request -> PO) ----------
+     When a Purchase Order is generated from a Requisition (or a defect
+     return), the person no longer manually picks Supplier / Category / Item /
+     Qty — everything is resolved from the requisition's requested item(s)
+     against the existing supplier product catalog and locked read-only. The
+     manual "+ New PO" flow (no linked request) keeps the original cascading
+     Category -> Item selects untouched. */
+  function lockField(el, locked){
+    if(!el) return;
+    el.classList.toggle('field-locked', !!locked);
+    el.tabIndex = locked ? -1 : 0;
+  }
+
+  // Toggles between "auto" (Request/defect generated PO — Supplier locked,
+  // "+ Add Item" hidden) and "manual" (the original "+ New PO" experience).
+  function setPoModalMode(modal, mode){
+    if(!modal) return;
+    const addBtn = modal.querySelector('#po-add-item-btn');
+    const hint = modal.querySelector('#po-items-hint');
+    const supplierHint = modal.querySelector('#po-supplier-hint');
+    const supplierField = modal.querySelector('#add-po-form [name="supplier"]');
+    modal.dataset.poMode = mode;
+    if(mode === 'auto'){
+      if(addBtn) addBtn.style.display = 'none';
+      if(hint) hint.textContent = 'Items, supplier, category, quantity, and pricing are generated automatically from the selected request.';
+      if(supplierHint) supplierHint.textContent = "Auto-filled from the requested item's supplier.";
+      lockField(supplierField, true);
+    } else if(mode === 'request'){
+      if(addBtn) addBtn.style.display = 'none';
+      if(hint) hint.textContent = 'Quantity is fixed from the requisition. Select the Supplier, then the Category and Item for each row.';
+      if(supplierHint) supplierHint.textContent = 'Select the supplier for this requisition\u2019s item(s).';
+      lockField(supplierField, false);
+    } else {
+      if(addBtn) addBtn.style.display = '';
+      if(hint) hint.textContent = 'Select a supplier first to load its categories and items.';
+      if(supplierHint) supplierHint.textContent = 'Select a supplier first to load its categories and items.';
+      lockField(supplierField, false);
+    }
+  }
+
+  // Normalizes a Requisition's requested item(s) into a flat list of
+  // {name, qty}. Most requisitions carry a single item/qty pair; if a
+  // requisition ever carries multiple item lines (reqData.items), one row is
+  // generated per line so the PO always mirrors exactly what was requested.
+  function buildRequestedItemsList(reqData){
+    if(Array.isArray(reqData?.items) && reqData.items.length){
+      return reqData.items
+        .map(it => ({ name: it.name || it.item || '', qty: Number(it.qty || 0) || 1 }))
+        .filter(it => it.name);
+    }
+    if(reqData?.item){
+      return [{ name: reqData.item, qty: Number(reqData.qty || 0) || 1 }];
+    }
+    return [];
+  }
+
+  function renderAutoPoItemRow(container, entry){
+    const template = document.getElementById('po-item-row-auto-template');
+    if(!container || !template) return null;
+    const row = template.content.firstElementChild.cloneNode(true);
+    const catField = row.querySelector('.po-item-category');
+    const itemField = row.querySelector('.po-item-name');
+    const qtyField = row.querySelector('.po-item-qty');
+    const priceField = row.querySelector('.po-item-price');
+    if(catField) catField.value = entry.category || 'Uncategorized';
+    if(itemField) itemField.value = entry.name || '';
+    if(qtyField) qtyField.value = entry.qty || 0;
+    if(priceField) priceField.value = Number(entry.unitPrice || 0).toFixed(2);
+    container.appendChild(row);
+    recomputePoRowAmount(row);
+    return row;
+  }
+
+  // Generates one read-only row per requested item, matching each item
+  // against the supplier catalog for its Category/Unit Price, then locks the
+  // shared Supplier field to whichever supplier owns the matched item(s) — a
+  // PO still belongs to a single supplier, unchanged from the existing
+  // PO/database structure.
+  function populateAutoPoItemRows(modal, reqData){
+    const container = modal?.querySelector('#po-items-rows');
+    const supplierField = modal?.querySelector('#add-po-form [name="supplier"]');
+    if(!container) return;
+    container.innerHTML = '';
+    const requested = buildRequestedItemsList(reqData);
+    let matchedSupplier = '';
+    requested.forEach(entry => {
+      const match = matchSupplierProductForItem(entry.name);
+      if(match && !matchedSupplier) matchedSupplier = match.supplierName;
+      renderAutoPoItemRow(container, {
+        name: entry.name,
+        qty: entry.qty,
+        category: match ? match.category : 'Uncategorized',
+        unitPrice: match ? match.unitPrice : 0
+      });
+    });
+    if(supplierField){
+      if(matchedSupplier && ![...supplierField.options].some(o => o.value === matchedSupplier)){
+        addSupplierOptionToPoForm(matchedSupplier);
+      }
+      supplierField.value = matchedSupplier;
+    }
+    setPoModalMode(modal, 'auto');
+    recomputePoTotals(modal);
+  }
+
+  // Picks the right per-row refresh routine for whatever mode the PO modal is
+  // currently in: 'request' rows have a Category select to repopulate,
+  // 'manual' rows use the original Category -> Item cascade, and 'auto' rows
+  // are fully locked already so there is nothing to refresh.
+  function syncPoItemRowsWithSupplier(modal){
+    const mode = modal?.dataset.poMode;
+    if(mode === 'request') refreshRequestPoItemRowsForSupplier(modal);
+    else if(mode !== 'auto') refreshAllPoItemRowsForSupplier(modal);
+  }
+
+  /* ---------- PO modal: requisition-generated rows, manual Supplier/Category
+     /Item ---------- Only Qty comes straight from the requisition; Supplier,
+     Category and Item are all picked manually, reusing the same Category ->
+     Item cascade (populatePoRowCategorySelect / bindPoItemRow) as the fully
+     manual "+ New PO" flow. Each row keeps a reminder label of which
+     requisitioned item it corresponds to. */
+  function renderRequestPoItemRow(container, { reqNum, name, qty }){
+    const template = document.getElementById('po-item-row-request-template');
+    if(!container || !template) return null;
+    const row = template.content.firstElementChild.cloneNode(true);
+    const labelField = row.querySelector('.po-item-request-label');
+    const qtyField = row.querySelector('.po-item-qty');
+    if(labelField) labelField.textContent = `Requisition · ${reqNum || ''} (${name || ''})`;
+    if(qtyField) qtyField.value = qty || 0;
+    container.appendChild(row);
+    recomputePoRowAmount(row);
+    return row;
+  }
+
+  // Generates one row per requested item (Qty fixed; Supplier/Category/Item
+  // all left for the user to pick manually).
+  function populateRequestPoItemRows(modal, reqData){
+    const container = modal?.querySelector('#po-items-rows');
+    const supplierField = modal?.querySelector('#add-po-form [name="supplier"]');
+    if(!container) return;
+    container.innerHTML = '';
+    const requested = buildRequestedItemsList(reqData);
+    requested.forEach(entry => {
+      const row = renderRequestPoItemRow(container, { reqNum: reqData?.reqNum, name: entry.name, qty: entry.qty });
+      if(row){
+        bindPoItemRow(modal, row);
+        populatePoRowCategorySelect(row, currentPoSupplierEntry(modal));
+      }
+    });
+    if(supplierField) supplierField.value = '';
+    setPoModalMode(modal, 'request');
+    recomputePoTotals(modal);
+  }
+
+  // Supplier changed while in request mode: repopulate every row's Category
+  // (and reset its Item/price, same as the manual flow) from the newly
+  // selected supplier.
+  function refreshRequestPoItemRowsForSupplier(modal){
+    const entry = currentPoSupplierEntry(modal);
+    modal?.querySelectorAll('.po-item-row-request').forEach(row => populatePoRowCategorySelect(row, entry));
+    recomputePoTotals(modal);
+  }
+
   function bindPoFormAutofill(modal){
     const form = modal?.querySelector('#add-po-form');
     if(!form || form.__poAutofillBound) return;
     form.__poAutofillBound = true;
     const supplierField = form.querySelector('[name="supplier"]');
-    // Selecting a supplier only loads that supplier's categories/items into
-    // every item row — it must never touch a row's unit price on its own.
-    supplierField?.addEventListener('change', () => refreshAllPoItemRowsForSupplier(modal));
+    // Selecting a supplier loads that supplier's categories/items into every
+    // item row (request or manual mode) — it must never touch a row's unit
+    // price on its own; auto-mode rows are already fully locked.
+    supplierField?.addEventListener('change', () => syncPoItemRowsWithSupplier(modal));
   }
 
   function refreshDeliveryPoOptions(){
@@ -420,45 +592,62 @@
     const yr = new Date().getFullYear();
     if(kind==='po'){
       bindPoFormAutofill(modal);
-      resetPoItemRows(modal);
       // Prefer the server-provided real next sequence (window.nextPoSeq) so the
       // number doesn't collide with existing POs; fall back to the local counter.
       const poNum = Number(window.nextPoSeq) > 0 ? Number(window.nextPoSeq) : (ID_COUNTS.po + 1);
       setModalFieldValue(modal, 'po', `PO-${yr}-${pad(poNum,4)}`);
       const exp = new Date(); exp.setDate(exp.getDate()+7);
       setModalFieldValue(modal, 'expected', exp.toISOString().slice(0,10));
-      refreshPoSupplierOptions(modal);
+      const createdByField = modal.querySelector('[name="createdBy"]');
+      if(createdByField){
+        createdByField.value = getCurrentEmployeeName() || createdByField.value;
+        createdByField.setAttribute('readonly', 'readonly');
+      }
 
-      // Auto-fill from requisition data — Qty, the reference number, and the
-      // requested Priority carry over. Item/Category/Supplier are chosen by
-      // the person creating the PO, not copied from the request.
+      // Defect returns stay fully auto-filled (Supplier/Category/Item/Qty/Unit
+      // Price all locked, no manual selection). Requisition conversions now
+      // only fix Item and Qty from the requisition — Supplier and Category
+      // are picked manually by the user. The "+ New PO" toolbar button (no
+      // reqData at all) keeps the original fully-manual entry experience.
+      const isDefectFlow = !!(reqData && reqData.defect);
+      const isRequestFlow = !!(reqData && reqData.reqNum && !reqData.defect);
+
       // Always set reqRef/priority explicitly (both directions) so a PO created
       // straight from this page doesn't inherit a leftover requisition
       // reference/priority from a previous conversion — form.reset() can't
       // clear these because their defaultValue gets mutated once assigned.
-      modal.__defectRow = (reqData && reqData.defect) ? (reqData.row || null) : null;
-      if(reqData){
+      modal.__defectRow = isDefectFlow ? (reqData.row || null) : null;
+      if(reqData && reqData.reqNum){
         setModalFieldValue(modal, 'reqRef', reqData.reqNum || '');
-        // A requisition may carry several item lines. Generate one PO item row
-        // per requested line and auto-fill ONLY the quantity — the category and
-        // item selections are left for the user to pick. Single-item
-        // requisitions fall back to filling the first row's quantity.
-        // A PO now carries a single item row — fill just its quantity.
-        resetPoItemRows(modal);
-        const firstRow = modal.querySelector('#po-items-rows .po-item-row');
-        const qtyField = firstRow?.querySelector('.po-item-qty');
-        if(qtyField) qtyField.value = reqData.qty ?? '';
         setModalFieldValue(modal, 'priority', normalizePriorityLabel(reqData.priority));
       } else {
         setModalFieldValue(modal, 'reqRef', '');
         setModalFieldValue(modal, 'priority', 'Normal');
       }
+
+      if(isDefectFlow){
+        setPoModalMode(modal, 'auto');
+      } else if(isRequestFlow){
+        setPoModalMode(modal, 'request');
+      } else {
+        setPoModalMode(modal, 'manual');
+        resetPoItemRows(modal);
+      }
+
+      refreshPoSupplierOptions(modal);
       setTimeout(() => {
-        // wait for supplier options/catalog to be ready before recomputing totals
+        // wait for supplier options/catalog to be ready before generating rows
         refreshPoSupplierOptions(modal).then(() => {
-          // Defect -> PO: auto-fill supplier, category, item and quantity from
-          // the defect's part (resolved against the loaded supplier catalog).
-          if(reqData && reqData.defect){ autofillPoFromDefect(modal, reqData); }
+          if(isDefectFlow){
+            // Defect -> PO: auto-fill supplier, category, item and quantity from
+            // the defect's part (resolved against the loaded supplier catalog).
+            autofillPoFromDefect(modal, reqData);
+          } else if(isRequestFlow){
+            // Requisition -> PO: one row per requested item (Item/Qty fixed,
+            // shown as a label); Supplier and Category are left for the user
+            // to pick manually.
+            populateRequestPoItemRows(modal, reqData);
+          }
           recomputePoTotals(modal);
         });
       }, 60);
@@ -497,10 +686,11 @@
       const form = modal.querySelector('form');
       if(form) form.reset();
       
-      // Reset PO modal title when closing
+      // Reset PO modal title and mode when closing
       if(kind === 'po'){
         const poTitle = modal.querySelector('h3');
         if(poTitle) poTitle.textContent = 'Create New Purchase Order';
+        setPoModalMode(modal, 'manual');
         resetPoItemRows(modal);
       }
     }
@@ -533,32 +723,51 @@
     openAddModal('po', { defect: true, part: part || '', qty: qty || 1, row: row || null });
   }
 
-  // Find which loaded supplier sells `part`, then drive the PO modal's
-  // supplier -> category -> item cascade and set the quantity.
-  function autofillPoFromDefect(modal, reqData){
-    const part = String(reqData.part || '').trim().toLowerCase();
-    if(!part) return;
-    const catalog = window.SUPPLIER_CATALOG || {};
-    let match = null;
-    for(const supplierName of Object.keys(catalog)){
-      const product = (catalog[supplierName].products || []).find(p => String(p.name || '').trim().toLowerCase() === part);
-      if(product){ match = { supplier: supplierName, category: (product.category || '').trim() || 'Uncategorized', name: product.name }; break; }
+  // Defect -> straight to Deliveries log, no PO. Auto-fills supplier/category
+  // by matching the defect's item name against the suppliers' product lists.
+  function receiveDefectDirectly(record, row){
+    const match = findSupplierForItem(record.part);
+    const supplierName = match ? match.name : 'Unassigned Supplier';
+    const table = document.querySelector('#deliveries-table tbody');
+    if(table){
+      ID_COUNTS.dr++;
+      NEXT_ID.dr = ID_COUNTS.dr + 1;
+      const shipNo = `DR-${String(ID_COUNTS.dr).padStart(4,'0')}`;
+      const today = todayISO();
+      const tr = document.createElement('tr');
+      tr.dataset.status = 'delivered';
+      tr.dataset.date = today;
+      tr.dataset.ship = shipNo;
+      tr.dataset.po = '';
+      tr.dataset.sup = supplierName;
+      tr.dataset.category = match ? match.category : 'General Procurement';
+      tr.dataset.items = record.part;
+      tr.dataset.note = `Direct return receive · ${record.part} · Qty ${record.qty}`;
+      tr.dataset.carrier = 'Direct return';
+      tr.innerHTML = `
+        <td><a class="po-link">${htmlEscape(shipNo)}</a></td>
+        <td>—</td>
+        <td>${supplierPill(supplierName)}</td>
+        <td title="${htmlEscape(record.part)}">${htmlEscape(record.part)}</td>
+        <td>${fmtDate(today)}</td>
+        <td>${statusPill('Delivered')}</td>
+        <td>${fmtDate(today)}</td>
+        <td><span class="row-actions"><button title="Track" onclick="openTrackModal(this)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button></span></td>`;
+      table.prepend(tr);
+      initRowActionButtons();
     }
-    if(!match) return;
+    updateDefectStatus(row, 'Delivered');
+    closeViewModal();
+    showToast(`${record.part} received — logged directly, no PO needed`, 'ok');
+  }
 
-    const supplierField = modal.querySelector('#add-po-form [name="supplier"]');
-    if(supplierField){ supplierField.value = match.supplier; }
-    refreshAllPoItemRowsForSupplier(modal);
-
-    const row = modal.querySelector('#po-items-rows .po-item-row');
-    if(!row) return;
-    const catField = row.querySelector('.po-item-category');
-    const itemField = row.querySelector('.po-item-name');
-    const qtyField = row.querySelector('.po-item-qty');
-    if(catField){ catField.value = match.category; catField.dispatchEvent(new Event('change', { bubbles: true })); }
-    if(itemField){ itemField.value = match.name; itemField.dispatchEvent(new Event('change', { bubbles: true })); }
-    if(qtyField){ qtyField.value = reqData.qty ?? 1; qtyField.dispatchEvent(new Event('input', { bubbles: true })); }
-    recomputePoTotals(modal);
+  // Find which loaded supplier sells `reqData.part`, then generate a single
+  // locked, auto-filled item row (Category/Item/Qty/Unit Price) the same way
+  // a Requisition-generated PO does — no manual cascade, nothing editable.
+  function autofillPoFromDefect(modal, reqData){
+    const part = String(reqData.part || '').trim();
+    if(!part) return;
+    populateAutoPoItemRows(modal, { item: part, qty: reqData.qty ?? 1 });
   }
 
   let cancelPOData = null;

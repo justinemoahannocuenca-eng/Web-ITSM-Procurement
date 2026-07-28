@@ -15,11 +15,6 @@
         <p>All purchase requisitions</p>
       </div>
 
-      <div class="filter-tabs" id="req-tabs" style="margin-bottom:16px;">
-        <div class="tab active" data-req-tab="requests" onclick="switchReqTab('requests', this)">Requests</div>
-        <div class="tab" data-req-tab="defects" onclick="switchReqTab('defects', this)">Defect Items</div>
-      </div>
-
       <div id="req-tab-requests">
 
       <div class="status-chart" id="requisition-status-chart">
@@ -121,7 +116,19 @@
             @forelse($requisitions as $req)
               <tr data-id="{{ $req->id ?? '' }}" data-source="{{ $req->source_connection ?? '' }}" data-status="{{ strtolower(str_replace(' ', '', $req->status ?? 'Pending')) }}" data-date="{{ $req->request_date }}" data-uom="{{ $req->uom ?? 'pcs' }}" data-notes="{{ $req->notes ?? '' }}" data-po="{{ isset($req->po_number) ? $req->po_number : '' }}" data-has-po="{{ isset($req->po_number) && $req->po_number ? '1' : '0' }}">
                 <td><a class="po-link">{{ $req->requisition_number }}</a></td>
-                <td>{{ $req->item }}</td>
+                <td>
+                    {{ $req->item }}
+                    @if(isset($req->defect_info))
+                        <div style="font-size:10px;color:#f59e0b;margin-top:2px;">
+                            ⚠ Defect #{{ $req->defect_info->id }} ({{ $req->defect_info->quantity }} {{ $req->defect_info->quantity > 1 ? 'pcs' : 'pc' }})
+                        </div>
+                        @if(isset($req->adjustment_info))
+                            <div style="font-size:10px;color:#94a3b8;">
+                                Adj #{{ $req->adjustment_info->id }} &middot; {{ ucfirst($req->adjustment_info->reason) }}
+                            </div>
+                        @endif
+                    @endif
+                </td>
                 <td>{{ $req->qty }}</td>
                 @php
                   $priorityClass = strtolower($req->priority ?? 'normal');
@@ -154,59 +161,5 @@
 
       </div>{{-- /#req-tab-requests --}}
 
-      <div id="req-tab-defects" class="hidden">
-        <div class="panel">
-          <div class="table-toolbar">
-            <h2>Defect Items</h2>
-            <div class="search-box">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              <input placeholder="Search defect items..." oninput="filterTable('defect-items-table', this.value)">
-            </div>
-          </div>
-          <table class="data-table sortable-table" id="defect-items-table">
-            <thead>
-              <tr>
-                <th class="sortable" data-key="part">PART NAME<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-                <th class="sortable" data-key="qty">QTY<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-                <th>DESCRIPTION</th>
-                <th class="sortable" data-key="status">STATUS<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-                <th class="sortable" data-key="source">SOURCE<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-                <th>REPORTED BY</th>
-                <th class="sortable sort-desc" data-key="date">DATE<span class="sort-arrows"><svg viewBox="0 0 8 5"><path d="M4 0L8 5H0z" fill="currentColor"/></svg><svg viewBox="0 0 8 5"><path d="M4 5L0 0h8z" fill="currentColor"/></svg></span></th>
-                <th>ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              @forelse(($defects ?? collect()) as $defect)
-                @php
-                  $defectStatus = $defect->status ?? 'Open';
-                  $defectStatusSlug = strtolower(str_replace(' ', '', $defectStatus));
-                  $defectSource = trim(($defect->source ?? '') . ($defect->source_id ? ' #' . $defect->source_id : '')) ?: '—';
-                @endphp
-                <tr data-status="{{ $defectStatusSlug }}" data-date="{{ $defect->created_at ?? '' }}" data-part="{{ $defect->part_name ?? '' }}" data-qty="{{ $defect->quantity ?? 1 }}" data-description="{{ $defect->description ?? '' }}">
-                  <td><b>{{ $defect->part_name ?? '—' }}</b></td>
-                  <td>{{ $defect->quantity ?? 0 }}</td>
-                  <td style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ $defect->description ?? '' }}">{{ $defect->description ?? '—' }}</td>
-                  <td><span class="status-pill {{ $defectStatusSlug }}">{{ ucfirst($defectStatus) }}</span></td>
-                  <td>{{ $defectSource }}</td>
-                  <td>{{ $defect->created_by ?? '—' }}</td>
-                  <td>{{ $defect->created_at ? \Carbon\Carbon::parse($defect->created_at)->format('M d, Y') : '—' }}</td>
-                  <td><span class="row-actions"><button title="View"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg></button></span></td>
-                </tr>
-              @empty
-                <tr>
-                  <td colspan="8" style="text-align:center; padding:40px 16px; color:var(--text-muted);">
-                    No defect items reported.
-                  </td>
-                </tr>
-              @endforelse
-            </tbody>
-          </table>
-          <div class="table-footer">
-            <div>Showing <b>{{ isset($defects) ? count($defects) : 0 }}</b> defect items</div>
-            <div class="pager"></div>
-          </div>
-        </div>
-      </div>{{-- /#req-tab-defects --}}
     </section>
 @endsection
